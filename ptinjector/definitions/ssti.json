@@ -1,0 +1,14 @@
+{
+    "description": "Template Injection",
+    "payloads": [
+        {
+            "payload": "/etc/passwd",
+            "verify": [
+                "foo"
+            ],
+            "type": "html",
+            "technology": ["apache"],
+            "vulnerability": "xss"
+        }
+    ]
+}

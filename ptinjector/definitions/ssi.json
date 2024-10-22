@@ -1,0 +1,54 @@
+{
+    "description": "Server Side Includes (shtml)",
+    "payloads": [
+        {
+            "payload": "<foo>test</foo>",
+            "verify": [
+                "foo"
+            ],
+            "type": "html",
+            "technology": ["apache"],
+            "vulnerability": "xss"
+        },
+        {
+            "payload": "--><foo>test</foo>",
+            "verify": [
+                "foo"
+            ],
+            "type": "html",
+            "technology": ["apache"],
+            "vulnerability": "xss"
+        },
+        {
+            "payload": "\"><foo>test</foo>",
+            "verify": [
+                "foo"
+            ],
+            "type": "html"
+        },
+        {
+            "payload": "'><foo>test</foo>",
+            "verify": [
+                "foo"
+            ],
+            "type": "html",
+            "vulnerability": "xss"
+        },
+        {
+            "payload": "'s",
+            "verify": [
+                "<title>"
+            ],
+            "type": "regex",
+            "vulnerability": "xss"
+        },
+        {
+            "payload": "'s",
+            "verify": [
+                "<title>"
+            ],
+            "type": "boolean",
+            "vulnerability": "xss"
+        }
+    ]
+}

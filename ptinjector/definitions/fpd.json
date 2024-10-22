@@ -1,0 +1,38 @@
+{
+    "description": "Full Path Disclosure",
+    "payloads": [
+        {
+            "payload": "/etc/passwd",
+            "verify": [
+                "foo"
+            ],
+            "type": "html",
+            "technology": ["apache"],
+            "vulnerability": "xss"
+        },
+        {
+            "payload": "../../../../../",
+            "verify": [
+                "foo"
+            ],
+            "type": "html",
+            "technology": ["apache"],
+            "vulnerability": "xss"
+        },
+        {
+            "payload": "\"><foo>test</foo>",
+            "verify": [
+                "foo"
+            ],
+            "type": "html"
+        },
+        {
+            "payload": "'><foo>test</foo>",
+            "verify": [
+                "foo"
+            ],
+            "type": "html",
+            "vulnerability": "xss"
+        }
+    ]
+}

@@ -1,0 +1,83 @@
+{
+    "description": "Cross Site Scripting",
+    "vulnerability": "PTV-WEB-SANIT-OUTPUTENC",
+    "payloads": [
+        {
+            "payload": "'\"><hr>\"'",
+            "verify": [
+                "foo"
+            ],
+            "type": "HTML_TAG"
+        },
+        {
+            "payload": "<foo>test</foo>",
+            "verify": [
+                "foo"
+            ],
+            "type": "HTML_TAG"
+        },
+        {
+            "payload": "</title></textarea></script>'\"><foo>test</foo>",
+            "verify": [
+                "foo"
+            ],
+            "type": "HTML_TAG"
+        },
+        {
+            "payload": "--><foo>test</foo>",
+            "verify": [
+                "foo"
+            ],
+            "type": "HTML_TAG"
+        },
+        {
+            "payload": "\"><foo>test</foo>",
+            "verify": [
+                "foo"
+            ],
+            "type": "HTML_TAG"
+        },
+        {
+            "payload": "'><foo>test</foo>",
+            "verify": [
+                "foo"
+            ],
+            "type": "HTML_TAG"
+        },
+        {
+            "payload": "</title><foo>test</foo>",
+            "verify": [
+                "foo"
+            ],
+            "type": "HTML_TAG"
+        },
+        {
+            "payload": "</textarea><foo>test</foo>",
+            "verify": [
+                "foo"
+            ],
+            "type": "HTML_TAG"
+        },
+        {
+            "payload": "</script><foo>test</foo>",
+            "verify": [
+                "foo"
+            ],
+            "type": "HTML_TAG"
+        },
+        {
+            "payload": "' foo='",
+            "verify": [
+                "foo"
+            ],
+            "type": "HTML_ATTR"
+        },
+        {
+            "payload": "\" foo=\"",
+            "verify": [
+                "foo"
+            ],
+            "type": "HTML_ATTR"
+        }
+    ]
+}
