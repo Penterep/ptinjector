@@ -1,0 +1,14 @@
+{
+    "description": "Remote Code Execution",
+    "payloads": [
+        {
+            "payload": "/etc/passwd",
+            "verify": [
+                "foo"
+            ],
+            "type": "html",
+            "technology": ["apache"],
+            "vulnerability": "xss"
+        }
+    ]
+}

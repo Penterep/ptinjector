@@ -1,0 +1,7 @@
+{
+    "description": "Blind SQL Injection",
+    "vulnerability": "PTV-WEB-SANIT-SQLINJ",
+    "payloads": [
+
+    ]
+}

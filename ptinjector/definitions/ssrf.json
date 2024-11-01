@@ -1,0 +1,20 @@
+{
+    "description": "Server Side Request Forgery",
+    "vuln_code": "SSRF",
+    "payloads": [
+        {
+            "payload": "[URL]",
+            "verify": [
+                "foo"
+            ],
+            "type": "request"
+        },
+        {
+            "payload": "foo || wget [url]",
+            "verify": [
+                "foo"
+            ],
+            "type": "request"
+        }
+]
+    }

@@ -1,0 +1,13 @@
+{
+    "description": "HTTP Response Splitting (CRLF Injection)",
+    "vuln_code": "CRLF",
+    "payloads": [
+        {
+            "payload": "foo%0D%0Afoo:foo",
+            "verify": [
+                "foo"
+            ],
+            "type": "header"
+        }
+    ]
+}

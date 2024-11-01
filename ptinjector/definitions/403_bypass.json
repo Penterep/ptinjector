@@ -1,0 +1,14 @@
+{
+    "description": "403 Bypass",
+    "vulnerability": "403_bypass",
+    "payloads": [
+        {
+            "payload": "",
+            "verify": [
+                ""
+            ],
+            "type": "html",
+            "technology": ["apache"]
+        }
+    ]
+}

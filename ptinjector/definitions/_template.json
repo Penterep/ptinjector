@@ -1,0 +1,12 @@
+{
+    "description": "Definition template",
+    "vuln_code": "",
+    "payloads": [
+        {
+            "payload": "",
+            "verify": [
+            ],
+            "type": ""
+        }
+]
+    }
