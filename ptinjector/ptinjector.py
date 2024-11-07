@@ -32,10 +32,10 @@ from typing import Tuple
 import requests
 from bs4 import BeautifulSoup
 from ptlibs import ptprinthelper, ptmisclib, ptjsonlib, ptnethelper, ptcharsethelper
+from ptlibs.parsers.http_request_parser import HttpRequestParser
 
 from _version import __version__
 from definitions._loader import DefinitionsLoader
-from helpers.request_file_parser import RequestFileParser
 
 
 class PtInjector:
@@ -46,75 +46,80 @@ class PtInjector:
         self.proxy: dict                                    = {"http": args.proxy, "https": args.proxy}
         self.parameter: str                                 = args.parameter
         self.keep_testing                                   = args.keep_testing
-        self.PLACEHOLDER_SYMBOL: str                        = "*"
         self.RANDOM_STRING: str                             = ''.join([random.choice(ptcharsethelper.get_charset(["numbers"])) for i in range(10)])
-        self.IS_PLACEHOLDER: bool                           = self.placeholder_exists(is_request_file=bool(args.request_file))
         self.VERIFICATION_URL, self.BASE64_VERIFICATION_URL = self.setup_verification_url(args)
-        self.LOADED_DEFINITIONS: dict                       = self.get_definitions(args, random_string=self.RANDOM_STRING) # Load definitions
+        self.PLACEHOLDER_SYMBOL: str                        = "<INJECT_HERE>"
+        self.PLACEHOLDER_EXISTS: bool                       = True if args.request_file else self.check_if_placeholder_exists()
         self.URL_PLACEHOLDER_INDEX: int                     = -1
-        self.url, self.request_data, self.http_method       = self.load_url_or_request_file(args)
-        self._ensure_valid_param_or_placeholder_usage()
-        if self.parameter:
-            self.process_parameters()
+        self.LOADED_DEFINITIONS: dict                       = self.get_definitions(args, random_string=self.RANDOM_STRING) # Load definitions
 
     def run(self, args):
         """Main method"""
+        request_parser: object = HttpRequestParser(ptjsonlib=self.ptjsonlib, use_json=self.use_json, placeholder=self.PLACEHOLDER_SYMBOL)
+        path_to_request_file: str = os.path.abspath(os.path.join(os.path.dirname(__file__), args.request_file)) if args.request_file else None
+
         # Iterate specified tests
         for vulnerability_name in self.LOADED_DEFINITIONS.keys():
             is_vulnerable: bool = False
+            is_vulnerable_during_keep_testing = False
             definition_contents: dict = self.LOADED_DEFINITIONS[vulnerability_name]
-            vulnerability_description = definition_contents.get('description', vulnerability_name)
+            vulnerability_description: str = definition_contents.get('description', vulnerability_name)
             confirmed_payloads = set()
-            if self.keep_testing:
-                is_vulnerable_during_keep_testing = False
-            ptprinthelper.ptprint(f"Testing: {vulnerability_name.upper() if not vulnerability_description else vulnerability_description}", "TITLE", colortext=True, condition=not self.use_json)
+            parameter_generator = self.generate_requests(args, request_parser, path_to_request_file)
 
-            # Iterate available payloads
-            for payload_object in definition_contents.get("payloads", []):
-                for payload_str in payload_object["payload"]:
-                    if is_vulnerable and not self.keep_testing:
-                        break
+            ptprinthelper.ptprint(f"Testing for: {vulnerability_name.upper() if not vulnerability_description else vulnerability_description}", "TITLE", colortext=True, condition=not self.use_json)
 
-                    # Send payload
-                    ptprinthelper.ptprint(f"Sending payload: {payload_str}", "", not self.use_json, end=f"\r", colortext=False, clear_to_eol=True)
-                    response, dump = self._send_payload(self.url, payload_str)
-                    response.history.append(response) # Append final destination to the response history
+            # For parameter
+            for parameter_name, url, request_data, http_method, headers in parameter_generator:
+                ptprinthelper.ptprint(f"Testing parameter: <{ptprinthelper.get_colored_text(parameter_name, 'TITLE')}>", "INFO", not self.use_json, colortext=False, clear_to_eol=True, newline_above=True)
 
-                    for response_object in response.history:
-                        is_vulnerable = self.check_if_vulnerable(response_object, payload_object)
-                        if self.keep_testing and is_vulnerable and not is_vulnerable_during_keep_testing:
-                            is_vulnerable_during_keep_testing = True
+                # Iterate available payloads
+                for payload_object in definition_contents.get("payloads", []):
+                    for payload_str in payload_object["payload"]:
                         if is_vulnerable and not self.keep_testing:
                             break
 
-                if is_vulnerable:
-                    ptprinthelper.ptprint(f"Vulnerable to {vulnerability_description} ({payload_str})", "VULN", condition=not self.use_json and not self.keep_testing, colortext=False, clear_to_eol=True)
-                    if self.keep_testing:
-                        confirmed_payloads.add(payload_str)
-                    self.ptjsonlib.add_vulnerability(definition_contents.get("vulnerability"), vuln_request=dump["request"], vuln_response=dump["response"]) # TODO: If <args.keep_testing>, do not add same vulnerability to json x times. Kolikrát se to má přidávat?
-                    if not self.keep_testing:
-                        break
+                        rdata = (url, request_data, http_method, headers)
 
-            if self.keep_testing:
-                if is_vulnerable_during_keep_testing:
-                    ptprinthelper.ptprint(f"Vulnerable to {vulnerability_description}", "VULN", condition=not self.use_json, colortext=False, clear_to_eol=True)
+                        ptprinthelper.ptprint(f"Sending payload: {payload_str}", "", not self.use_json, end=f"\r", colortext=False, clear_to_eol=True)
+                        response, dump = self._send_payload(url, payload_str, rdata)
+                        response.history.append(response) # Append final destination to the response history
+
+                        for response_object in response.history:
+                            is_vulnerable = self.check_if_vulnerable(response_object, payload_object)
+                            if self.keep_testing and is_vulnerable and not is_vulnerable_during_keep_testing:
+                                is_vulnerable_during_keep_testing = True
+                            if is_vulnerable and not self.keep_testing:
+                                break
+
+                    if is_vulnerable:
+                        ptprinthelper.ptprint(f"{ptprinthelper.get_colored_text(payload_str, 'VULN')}", "TEXT", not self.use_json, end="\n", colortext=False, clear_to_eol=True)
+                        ptprinthelper.ptprint(f"Vulnerable to {vulnerability_description}", "VULN", condition=not self.use_json and not self.keep_testing, colortext=False, clear_to_eol=True)
+                        if self.keep_testing:
+                            confirmed_payloads.add(payload_str)
+                        self.ptjsonlib.add_vulnerability(definition_contents.get("vulnerability"), vuln_request=dump["request"], vuln_response=dump["response"]) # TODO: If <args.keep_testing>, do not add same vulnerability to json x times. Kolikrát se to má přidávat?
+                        if not self.keep_testing:
+                            break
+
+                if self.keep_testing:
+                    if is_vulnerable_during_keep_testing:
+                        ptprinthelper.ptprint(f"Vulnerable to {vulnerability_description}", "VULN", condition=not self.use_json, colortext=False, clear_to_eol=True)
+                    else:
+                        ptprinthelper.ptprint(f"Not vulnerable to {vulnerability_description}", "NOTVULN", condition=not self.use_json, colortext=False, clear_to_eol=True)
+
+                    """
+                    if confirmed_payloads:
+                        ptprinthelper.ptprint(f"Confirmed payloads:", "TITLE", condition=not self.use_json, colortext=True, clear_to_eol=True)
+                        ptprinthelper.ptprint("\n".join(confirmed_payloads), "TEXT", condition=not self.use_json, colortext=False)
+                    """
                 else:
-                    ptprinthelper.ptprint(f"Not vulnerable to {vulnerability_description}", "NOTVULN", condition=not self.use_json, colortext=False, clear_to_eol=True)
+                    if not is_vulnerable and definition_contents.get("payloads", []):
+                        ptprinthelper.ptprint(f"Not vulnerable to {vulnerability_description}", "NOTVULN", condition=not self.use_json, colortext=False, clear_to_eol=True)
 
-                if confirmed_payloads:
-                    ptprinthelper.ptprint(f"Confirmed payloads:", "TITLE", condition=not self.use_json, colortext=True, clear_to_eol=True)
-                    ptprinthelper.ptprint("\n".join(confirmed_payloads), "TEXT", condition=not self.use_json, colortext=False)
+                if not definition_contents.get("payloads", []):
+                    ptprinthelper.ptprint(f"No payloads available to test for {vulnerability_description} vulnerability", "NOTVULN", condition=not self.use_json, colortext=False, clear_to_eol=True)
 
-            else:
-                if not is_vulnerable and definition_contents.get("payloads", []):
-                    ptprinthelper.ptprint(f"Not vulnerable to {vulnerability_description}", "NOTVULN", condition=not self.use_json, colortext=False, clear_to_eol=True)
-
-            if not definition_contents.get("payloads", []):
-                ptprinthelper.ptprint(f"No payloads available to test for {vulnerability_description} vulnerability", "NOTVULN", condition=not self.use_json, colortext=False, clear_to_eol=True)
-
-            ptprinthelper.ptprint(f" ", "", condition=not self.use_json, colortext=False, clear_to_eol=True)
-
-        ptprinthelper.ptprint("Finished", "TITLE", condition=not self.use_json, clear_to_eol=True)
+        ptprinthelper.ptprint("Finished", "TITLE", condition=not self.use_json, clear_to_eol=True, newline_above=True)
         if self.use_json:
             self.ptjsonlib.set_status("finished")
             print(self.ptjsonlib.get_result_json())
@@ -207,30 +212,30 @@ class PtInjector:
     def verify_headers(self, response, verification_list: list):
         return True if any([any(verification_string in header_name for verification_string in verification_list) for header_name in response.headers.keys()]) else False
 
-    def _send_payload(self, url: str, payload: str) -> requests.models.Response:
+    def _send_payload(self, url: str, payload: str, rdata=None) -> requests.models.Response:
         """Send <payload> to <url>"""
-        attack_headers = self.payload2dict({**self.http_headers}, payload) if self.IS_PLACEHOLDER and not self.placeholder_in_url() else {**self.http_headers}
-        timeout = None #payload_dict["verify"][0] if payload_dict["type"] == "time" else 10
+        #attack_headers = self.payload2dict({**self.http_headers}, payload) if self.PLACEHOLDER_EXISTS and not self.placeholder_in_url() else {**self.http_headers}
+        #timeout = None #payload_dict["verify"][0] if payload_dict["type"] == "time" else 10
+        timeout = 10
+        url, data, http_method, headers = rdata
 
-        if self.placeholder_in_url():
-            response, dump = ptmisclib.load_url_from_web_or_temp(url[:self.URL_PLACEHOLDER_INDEX] + payload + url[self.URL_PLACEHOLDER_INDEX:], method=self.http_method, headers=attack_headers, proxies=self.proxy, data=self.request_data, redirects=False, verify=False, timeout=timeout, dump_response=True)
+        URL_PLACEHOLDER_INDEX = self.get_placeholder_from_url(url)
+        if URL_PLACEHOLDER_INDEX:
+            response, dump = ptmisclib.load_url_from_web_or_temp(url[:URL_PLACEHOLDER_INDEX] + payload + url[URL_PLACEHOLDER_INDEX + len(self.PLACEHOLDER_SYMBOL):], method=http_method, headers=headers, data=data, redirects=False, proxies=self.proxy, verify=False, timeout=timeout, dump_response=True)
             return response, dump
 
         else: # placeholder elsewhere (in headers or post data)
-            if self.http_method == "GET":
-                #url = re.sub(fr"{self.parameter}=([\d\w]+)", fr"{self.parameter}={payload}", url)
-                #response = requests.request(self.http_method, url, headers=headers, proxies=self.proxy, data=self.request_data, allow_redirects=False, verify=False, timeout=timeout)
-                response, dump = ptmisclib.load_url_from_web_or_temp(url, method=self.http_method, headers=attack_headers, proxies=self.proxy, data=self.request_data, redirects=False, verify=False, timeout=timeout, dump_response=True)
+
+            data = re.sub(self.PLACEHOLDER_SYMBOL, payload, data)
+
+            if http_method == "GET":
+                response, dump = ptmisclib.load_url_from_web_or_temp(url, method=http_method, headers=headers, proxies=self.proxy, data=data, redirects=False, verify=False, timeout=timeout, dump_response=True)
                 return response, dump
 
-            if self.http_method == "POST":
-                attack_data = self.payload2dict(self.str2dict(), payload) # TODO: Make it work for different content-types: eg. JSON, XML, ...
-                response, dump = ptmisclib.load_url_from_web_or_temp(url, method=self.http_method, headers=attack_headers, proxies=self.proxy, data=attack_data, redirects=False, verify=False, timeout=timeout, dump_response=True)
+            if http_method == "POST":
+                #attack_data = self.payload2dict(self.str2dict(), payload) # TODO: Make it work for different content-types: eg. JSON, XML, ...
+                response, dump = ptmisclib.load_url_from_web_or_temp(url, method=http_method, headers=headers, proxies=self.proxy, data=data, redirects=False, verify=False, timeout=timeout, dump_response=True)
                 return response, dump
-
-    def placeholder_in_url(self) -> bool:
-        """Returns True if placeholder is present in URL."""
-        return True if self.URL_PLACEHOLDER_INDEX != -1 else False
 
     def is_valid_definition(self, definition: dict):
         """Return True if <definition> is in a valid format"""
@@ -259,13 +264,8 @@ class PtInjector:
         return result
 
     def get_placeholder_from_url(self, url) -> Tuple[str, int]:
-        """
-        Extracts the placeholder from the URL.
-        Returns a tuple containing:
-            1. The URL with the placeholder removed.
-            2. The position of the placeholder in the original URL.
-        """
-        placeholder_position: str = url.find(self.PLACEHOLDER_SYMBOL) # Returns -1 if not present
+        """Extracts the placeholder from the URL."""
+        placeholder_position: int = url.find(self.PLACEHOLDER_SYMBOL) # Returns -1 if not present
         parsed_url = urllib.parse.urlparse(url)
         pathless_url = urllib.parse.urlunparse((parsed_url.scheme, parsed_url.netloc, "/", "", "", "")) # https://www.example.com/
 
@@ -273,14 +273,10 @@ class PtInjector:
             self.ptjsonlib.end_error("Wrong placeholder usage (placeholder supported only in PATH)", self.use_json)
         if not re.match("https?", parsed_url.scheme):
             self.ptjsonlib.end_error(f"Missing or wrong scheme, did you mean https://{url}?", self.use_json)
+        return placeholder_position
 
-        new_url = url.replace(self.PLACEHOLDER_SYMBOL, "")
-        return new_url, placeholder_position
-
-    def placeholder_exists(self, is_request_file: bool):
+    def check_if_placeholder_exists(self):
         """Check for presence of placeholder in <sys.argv>"""
-        if is_request_file:
-            return True  # Placeholder presence is already checked inside request_file parser.
         placeholder_count = 0
         for arg in list(sys.argv[1:]):
             placeholder_count += arg.count(self.PLACEHOLDER_SYMBOL)
@@ -333,48 +329,7 @@ class PtInjector:
             base64.b64encode(bytes(f'<img src="{verification_url}">', "ascii"))
             if verification_url else None
         )
-
         return verification_url, base64_verification_url
-
-    def load_url_or_request_file(self, args):
-        """
-        Load the URL or request data from the provided arguments.
-
-        This method checks if a URL or a request file is specified in the
-        provided arguments. If a URL is given, it extracts the URL and any
-        relevant parameters. If a request file is specified, it parses the
-        file to retrieve the URL, request data, HTTP method, and headers.
-        The headers are updated in the instance's HTTP headers.
-
-        Args:
-            args: An object containing command-line arguments, which may include:
-                - url: A string representing the target URL.
-                - request_file: A path to a file containing request data.
-
-        Returns:
-            tuple: A tuple containing:
-                - url (str): The loaded or parsed URL.
-                - request_data (str): The associated request data.
-                - http_method (str): The HTTP method to be used for the request.
-
-        Raises:
-            ValueError: If neither a URL nor a request file is provided in args.
-        """
-        if args.url:
-            url, placeholder_position = self.get_placeholder_from_url(args.url)
-            request_data = args.data or None
-            http_method = "POST" if args.data else "GET"  # Default to "POST" if data is provided
-            self.URL_PLACEHOLDER_INDEX = placeholder_position
-            return url, request_data, http_method
-
-        elif args.request_file:
-            url, request_data, http_method, headers = RequestFileParser(self.PLACEHOLDER_SYMBOL, self.ptjsonlib, self.use_json).parse_request_file(os.path.abspath(os.path.join(os.path.dirname(__file__), args.request_file)))
-            url, placeholder_position = self.get_placeholder_from_url(url)
-            self.URL_PLACEHOLDER_INDEX = placeholder_position
-            self.http_headers.update(headers)
-            return url, request_data, http_method
-        else:
-            self.ptjsonlib.end_error("<URL> or <request-file> is required", self.use_json)
 
     def process_parameters(self):
         """Process GET and POST parameters to replace the specified parameter with a placeholder symbol."""
@@ -405,6 +360,35 @@ class PtInjector:
                     f"    Available POST parameters: {', '.join(post_parameters_dict.keys()) if post_parameters_dict else None}")
                 self.ptjsonlib.end_error(error_message, self.use_json)
 
+    def generate_requests(self, args, request_parser, path_to_request_file):
+        if args.parameter:
+            try:
+                if args.request_file:
+                    http_request = request_parser.mark_placeholder(http_request=path_to_request_file, parameter=args.parameter)
+                else:
+                    http_request = request_parser.build_request(url=args.url, headers=self.http_headers, request_data=args.data)
+                    http_request = request_parser.mark_placeholder(http_request=http_request, parameter=args.parameter)
+                url, request_data, http_method, headers = request_parser.parse_http_request(http_request=http_request)
+                yield (args.parameter, url, request_data, http_method, headers)
+            except Exception as e:
+                sys.exit(e)
+        else:
+            parameter_index = 0
+            while True:
+                try:
+                    if args.request_file:
+                        http_request = request_parser.mark_placeholder(http_request=path_to_request_file, parameter=parameter_index)
+                        parameter_name = request_parser.get_parameter_name_by_index(http_request, parameter_index)
+                        url, request_data, http_method, headers = request_parser.parse_http_request(http_request=http_request)
+                    else:
+                        http_request = request_parser.build_request(url=args.url, headers=self.http_headers, request_data=args.data)
+                        http_request = request_parser.mark_placeholder(http_request=http_request, parameter=parameter_index)
+                        parameter_name = request_parser.get_parameter_name_by_index(http_request, parameter_index)
+                    yield (parameter_name, url, request_data, http_method, headers)
+                    parameter_index += 1
+                except IndexError as e:
+                    break
+
     def get_definitions(self, args, random_string: str):
         """Load Definitions. <random_string> is for replacing placeholders inside."""
         try:
@@ -413,9 +397,9 @@ class PtInjector:
             self.ptjsonlib.end_error(f"{exc}, program will exit.", self.use_json)
 
     def _ensure_valid_param_or_placeholder_usage(self):
-        if not self.parameter and not self.IS_PLACEHOLDER:
+        if not self.parameter and not self.PLACEHOLDER_EXISTS:
             self.ptjsonlib.end_error(f"You must specify a parameter to test or use the '{self.PLACEHOLDER_SYMBOL}' placeholder to indicate where the script should perform the test.", self.use_json)
-        if self.parameter and self.IS_PLACEHOLDER:
+        if self.parameter and self.PLACEHOLDER_EXISTS:
             self.ptjsonlib.end_error(f"Cannot combine --parameter and placeholder '{self.PLACEHOLDER_SYMBOL}' together", self.use_json)
 
 def get_help():
