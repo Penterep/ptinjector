@@ -52,8 +52,8 @@ class DefinitionsLoader:
                     else:
                         skipped_tests.append(definition_filename.split(".json")[0].replace("_", " ").upper())
 
-        if skipped_tests:
-            ptprinthelper.ptprint(f"Skipped tests: {', '.join(skipped_tests)} - definitions do not contain any valid payloads.", "WARNING", condition=not self.use_json)
+        #if skipped_tests:
+        #    ptprinthelper.ptprint(f"Skipped tests: {', '.join(skipped_tests)} - definitions do not contain any valid payloads.", "WARNING", condition=not self.use_json)
 
         if loaded_definitions:
             ptprinthelper.ptprint(f" ", "TEXT", condition=not self.use_json)
@@ -93,7 +93,7 @@ class DefinitionsLoader:
         required_top_level_keys = ["description", "payloads"]
         # Check top-level keys and their types
         if not json_data or not all(key in json_data for key in required_top_level_keys) or not isinstance(json_data["description"], str) or not isinstance(json_data["payloads"], list):
-            ptprinthelper.ptprint(f"Warning: File {definition_filename} is not of a valid structure. Please ensure that the file follows the correct structure and contains valid values.", "WARNING", condition=not self.use_json)
+            #ptprinthelper.ptprint(f"Warning: File {definition_filename} is not of a valid structure. Please ensure that the file follows the correct structure and contains valid values.", "WARNING", condition=not self.use_json)
             return False
         else:
             return True

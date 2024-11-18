@@ -7,7 +7,7 @@ with open("README.md", "r") as fh:
 setuptools.setup(
     name="ptinjector",
     version=__version__,
-    description="Injection Vulnerability Testing Framework",
+    description="Injection Vulnerability Testing Tool",
     author="Penterep",
     author_email="info@penterep.com",
     url="https://www.penterep.com/",
@@ -21,7 +21,7 @@ setuptools.setup(
         "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)"
     ],
     python_requires='>=3.9',
-    install_requires=["ptlibs>=1.0.9,<2", "bs4", "html5lib", "flask", "apscheduler"],
+    install_requires=["ptlibs>=1.0.10,<2", "bs4", "html5lib", "flask", "apscheduler"],
     entry_points = {'console_scripts': ['ptinjector = ptinjector.ptinjector:main']},
     include_package_data= True,
     long_description=long_description,

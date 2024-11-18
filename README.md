@@ -1,7 +1,7 @@
 [![penterepTools](https://www.penterep.com/external/penterepToolsLogo.png)](https://www.penterep.com/)
 
 
-## PTINJECTOR - Injection Vulnerability Testing Framework
+## PTINJECTOR - Injection Vulnerability Testing Tool
 
 ## Installation
 
