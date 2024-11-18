@@ -7,7 +7,7 @@ with open("README.md", "r") as fh:
 setuptools.setup(
     name="ptinjector",
     version=__version__,
-    description="Injection Vulnerability Testing Framework",
+    description="Injection Vulnerability Testing Tool",
     author="Penterep",
     author_email="info@penterep.com",
     url="https://www.penterep.com/",
