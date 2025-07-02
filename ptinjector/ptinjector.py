@@ -69,7 +69,7 @@ class PtInjector:
             # TODO: ptprinthelper.ptprint(f"Testing connection to the target URL", "TITLE", colortext=True, condition=not self.use_json)
 
             # Current tested vulnerability
-            ptprinthelper.ptprint(f"{vulnerability_name.upper() if not vulnerability_description else vulnerability_description}", "TITLE", colortext=True, condition=not self.use_json, newline_above=True)
+            ptprinthelper.ptprint("Testing: " + f"{vulnerability_name.upper() if not vulnerability_description else vulnerability_description}", "TITLE", colortext=True, condition=not self.use_json, newline_above=True)
 
             # Test parameter loop
             for request_data in self.generate_request_data(args):
@@ -112,7 +112,7 @@ class PtInjector:
                     if is_vulnerable_during_keep_testing:
                         ptprinthelper.ptprint(f"Vulnerable to {vulnerability_description}", "VULN", condition=not self.use_json, colortext=True, clear_to_eol=True)
                     else:
-                        ptprinthelper.ptprint(f"Not vulnerable to {vulnerability_description}", "NOTVULN", condition=not self.use_json, colortext=True, clear_to_eol=True)
+                        ptprinthelper.ptprint(f"Not vulnerable to {vulnerability_description}", "OK", condition=not self.use_json, colortext=True, clear_to_eol=True)
 
                     """
                     if confirmed_payloads:
@@ -121,7 +121,7 @@ class PtInjector:
                     """
                 else:
                     if not is_vulnerable and definition_contents.get("payloads", []):
-                        ptprinthelper.ptprint(f"Not vulnerable to {vulnerability_description}", "NOTVULN", condition=not self.use_json, colortext=True, clear_to_eol=True)
+                        ptprinthelper.ptprint(f"Not vulnerable to {vulnerability_description}", "OK", condition=not self.use_json, colortext=True, clear_to_eol=True)
 
                 if not definition_contents.get("payloads", []):
                     ptprinthelper.ptprint(f"No payloads available to test for {vulnerability_description} vulnerability", "NOTVULN", condition=not self.use_json, colortext=False, clear_to_eol=True)
@@ -166,14 +166,14 @@ class PtInjector:
         """Returns True if definition['verify'] in <response> text"""
         # TODO: Call fnc is_safe_to_parse()
         soup = BeautifulSoup(response.text, "html5lib")
-        if soup.findAll(verification_list):
+        if soup.find_all(verification_list):
             return True
 
     def verify_html_attrs(self, response, verification_list: list):
         """See if any HTML attribute reflects <definition["verify"]>"""
         # TODO: Call fnc is_safe_to_parse()
         soup = BeautifulSoup(response.text, "html5lib")
-        for tag in soup.findAll(True):  # True finds all tags
+        for tag in soup.find_all(True):  # True finds all tags
             for attr, value in tag.attrs.items():
                 for verification_str in verification_list:
                     if verification_str == attr:
@@ -337,7 +337,7 @@ class PtInjector:
 
         if self.parameter:
             parsed_url = urllib.parse.urlparse(self.url)
-            get_parameters = re.findall(r"([\w\d]+)=", urllib.parse.urlparse(self.url).query)
+            get_parameters = re.find_all(r"([\w\d]+)=", urllib.parse.urlparse(self.url).query)
             post_parameters_dict = dict(urllib.parse.parse_qsl(self.request_data))
 
             # If <parameter> in GET params
