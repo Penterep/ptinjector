@@ -56,6 +56,8 @@ class PtInjector:
     def run(self, args):
         """Main method"""
 
+        #ptprinthelper.ptprint(f"Target URL: {args.url}", "TITLE", colortext=True, condition=not self.use_json)
+
         # Iterate specified tests
         for vulnerability_name in self.LOADED_DEFINITIONS.keys():
             is_vulnerable: bool = False
@@ -83,13 +85,11 @@ class PtInjector:
                         if is_vulnerable and not self.keep_testing:
                             break
 
-                        #ptprinthelper.ptprint(f"Sending payload: {payload_str}", "", not self.use_json, end=f"\r", colortext=False, clear_to_eol=True)
                         ptprinthelper.ptprint(f"Sending payload: {payload_str}", "INFO", not self.use_json, end=f"\n", colortext=False, clear_to_eol=True)
                         try:
                             response, dump = self._send_payload(request_data.get("url"), payload_str, request_data)
                         except requests.exceptions.RequestException as e:
-                            ptprinthelper.ptprint(f"Error connecting to {request_data.get("url")} ({e})", "ERROR", not self.use_json, end=f"\n", colortext=False, clear_to_eol=True)
-                            continue
+                            self.ptjsonlib.end_error(f"Error connecting to {args.url}:", details=e ,condition=self.use_json)
                         response.history.append(response) # Append final destination to the response history
 
                         #if response.status_code != 200:
@@ -167,7 +167,7 @@ class PtInjector:
             if res.json().get("msg") == "true":
                 return True
         except requests.exceptions.RequestException as e:
-            ptprinthelper.ptprint(f"Error connecting to {self.VERIFICATION_URL} ({e})", "ERROR", not self.use_json, end=f"\n", colortext=False, clear_to_eol=True)
+            self.ptjsonlib.end_error(f"Error connecting to {self.VERIFICATION_URL}", details=e, condition=self.use_json)
             return False
 
     def verify_html_tags(self, response, verification_list: list):
