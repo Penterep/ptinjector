@@ -85,7 +85,11 @@ class PtInjector:
 
                         #ptprinthelper.ptprint(f"Sending payload: {payload_str}", "", not self.use_json, end=f"\r", colortext=False, clear_to_eol=True)
                         ptprinthelper.ptprint(f"Sending payload: {payload_str}", "INFO", not self.use_json, end=f"\n", colortext=False, clear_to_eol=True)
-                        response, dump = self._send_payload(request_data.get("url"), payload_str, request_data)
+                        try:
+                            response, dump = self._send_payload(request_data.get("url"), payload_str, request_data)
+                        except requests.exceptions.RequestException as e:
+                            ptprinthelper.ptprint(f"Error connecting to {request_data.get("url")} ({e})", "ERROR", not self.use_json, end=f"\n", colortext=False, clear_to_eol=True)
+                            continue
                         response.history.append(response) # Append final destination to the response history
 
                         #if response.status_code != 200:
@@ -158,9 +162,13 @@ class PtInjector:
     def verify_request(self):
         """Verify request type payloads"""
         # Send requests to /verify endpoint of verification-url.
-        res, dump = self._send_payload(self.VERIFICATION_URL, "")
-        if res.json().get("msg") == "true":
-            return True
+        try:
+            res, dump = self._send_payload(self.VERIFICATION_URL, "")
+            if res.json().get("msg") == "true":
+                return True
+        except requests.exceptions.RequestException as e:
+            ptprinthelper.ptprint(f"Error connecting to {self.VERIFICATION_URL} ({e})", "ERROR", not self.use_json, end=f"\n", colortext=False, clear_to_eol=True)
+            return False
 
     def verify_html_tags(self, response, verification_list: list):
         """Returns True if definition['verify'] in <response> text"""
