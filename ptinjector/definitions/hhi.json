@@ -2,12 +2,5 @@
     "description": "Host Header Injection",
     "vuln_code": "HHI",
     "payloads": [
-        {
-            "payload": "foo",
-            "verify": [
-                "foo"
-            ],
-            "type": "regex"
-        }
     ]
 }
