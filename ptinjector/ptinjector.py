@@ -71,13 +71,13 @@ class PtInjector:
             # TODO: ptprinthelper.ptprint(f"Testing connection to the target URL", "TITLE", colortext=True, condition=not self.use_json)
 
             # Current tested vulnerability
-            ptprinthelper.ptprint("Testing: " + f"{vulnerability_name.upper() if not vulnerability_description else vulnerability_description}", "TITLE", colortext=True, condition=not self.use_json, newline_above=True)
+            ptprinthelper.ptprint("Testing: " + f"{vulnerability_name.upper() if not vulnerability_description else vulnerability_description}", "TITLE", colortext=True, condition=(not self.use_json), newline_above=True)
 
             # Test parameter loop
             for request_data in self.generate_request_data(args):
                 parameter_name = request_data["parameter"]
                 is_vulnerable: bool = False
-                ptprinthelper.ptprint(f"Testing parameter: <{ptprinthelper.get_colored_text(request_data['parameter'], 'TITLE')}>", "TITLE", not self.use_json, colortext=False, clear_to_eol=True, newline_above=True)
+                ptprinthelper.ptprint(f"Testing parameter: <{ptprinthelper.get_colored_text(request_data['parameter'], 'TITLE')}>", "TITLE", not self.use_json, colortext=False, clear_to_eol=True, newline_above=False)
 
                 # Iterate available payloads
                 for payload_object in definition_contents.get("payloads", []):
@@ -85,7 +85,7 @@ class PtInjector:
                         if is_vulnerable and not self.keep_testing:
                             break
 
-                        ptprinthelper.ptprint(f"Sending payload: {payload_str}", "INFO", not self.use_json, end=f"\n", colortext=False, clear_to_eol=True)
+                        ptprinthelper.ptprint(f"Sending payload: {payload_str}", "", condition=(args.verbose and not self.use_json), end=f"\n", colortext=False, clear_to_eol=True, indent=4)
                         try:
                             response, dump = self._send_payload(request_data.get("url"), payload_str, request_data)
                         except requests.exceptions.RequestException as e:
@@ -102,33 +102,34 @@ class PtInjector:
                             if is_vulnerable and not self.keep_testing:
                                 break
 
-                    if is_vulnerable:
-                        ptprinthelper.ptprint(f"Payload executed: {payload_str}", "VULN", not self.use_json, end="\n", colortext=False, clear_to_eol=True)
-
-                        ptprinthelper.ptprint(f"Parameter <{parameter_name}> seems to be vulnerable to {vulnerability_description}", "VULN", condition=not self.use_json and not self.keep_testing, colortext=True, clear_to_eol=True)
+                    if is_vulnerable and args.verbose:
+                        ptprinthelper.ptprint(f"Payload executed: {payload_str}", "VULN", not self.use_json, end="\n", colortext=False, clear_to_eol=True, indent=4)
+                        #ptprinthelper.ptprint(f"Parameter <{ptprinthelper.get_colored_text(request_data['parameter'], 'TITLE')}> seems to be vulnerable to {vulnerability_description}", "VULN", condition=not self.use_json and not self.keep_testing, colortext=False, clear_to_eol=True, indent=4)
                         if self.keep_testing:
                             confirmed_payloads.add(payload_str)
                         self.ptjsonlib.add_vulnerability(definition_contents.get("vulnerability"), vuln_request=dump["request"], vuln_response=dump["response"])
                         if not self.keep_testing:
                             break
 
+                # Results after for loop
                 if self.keep_testing:
                     if is_vulnerable_during_keep_testing:
-                        ptprinthelper.ptprint(f"Vulnerable to {vulnerability_description}", "VULN", condition=not self.use_json, colortext=True, clear_to_eol=True)
+                        ptprinthelper.ptprint(f"Vulnerable to {vulnerability_description}", "VULN", condition=not self.use_json, colortext=True, clear_to_eol=True, indent=4)
                     else:
-                        ptprinthelper.ptprint(f"Not vulnerable to {vulnerability_description}", "OK", condition=not self.use_json, colortext=True, clear_to_eol=True)
-
+                        ptprinthelper.ptprint(f"Not vulnerable to {vulnerability_description}", "OK", condition=not self.use_json, colortext=True, clear_to_eol=True, indent=4)
                     """
                     if confirmed_payloads:
                         ptprinthelper.ptprint(f"Executed payloads:", "TITLE", condition=not self.use_json, colortext=True, clear_to_eol=True)
                         ptprinthelper.ptprint("\n".join(confirmed_payloads), "TEXT", condition=not self.use_json, colortext=False)
                     """
                 else:
-                    if not is_vulnerable and definition_contents.get("payloads", []):
-                        ptprinthelper.ptprint(f"Not vulnerable to {vulnerability_description}", "OK", condition=not self.use_json, colortext=True, clear_to_eol=True)
-
-                if not definition_contents.get("payloads", []):
-                    ptprinthelper.ptprint(f"No payloads available to test for {vulnerability_description} vulnerability", "NOTVULN", condition=not self.use_json, colortext=False, clear_to_eol=True)
+                    if definition_contents.get("payloads", []):
+                        if is_vulnerable:
+                            ptprinthelper.ptprint(f"Vulnerable to {vulnerability_description}", "VULN", condition=not self.use_json, colortext=True, clear_to_eol=True, indent=4)
+                        else:
+                            ptprinthelper.ptprint(f"Not vulnerable to {vulnerability_description}", "OK", condition=not self.use_json, colortext=True, clear_to_eol=True, indent=4)
+                    else:
+                        ptprinthelper.ptprint(f"No payloads available to test for {vulnerability_description} vulnerability", "NOTVULN", condition=not self.use_json, colortext=False, clear_to_eol=True)
 
         ptprinthelper.ptprint("Finished", "TITLE", condition=not self.use_json, clear_to_eol=True, newline_above=True)
         if self.use_json:
@@ -460,7 +461,7 @@ def get_help():
         ]},
         {"options": [
             ["-u",  "--url",                   "<url>",           "Test URL"],
-            ["-t",  "--test",      "<test>",                      "Specify one or more tests to perform:"],
+            ["-ts", "--test",      "<test>",                      "Specify one or more tests to perform:"],
             *DefinitionsLoader().get_definitions_help(),
             ["",    "",                       "",                 ""],
             ["-rf", "--request_file",         "<request-file>",   "Set request-file.txt"],
@@ -471,12 +472,13 @@ def get_help():
             ["-a",  "--agent",                "<agent>",          "Set User-Agent"],
             ["-p",  "--proxy",                "<proxy>",          "Set Proxy"],
             ["-vu", "--verify-url",           "<verify-url>",     "Set Verification URL (used with e.g. SSRF)"],
-            ["-g", "--technology",            "<technology>",     "Set Technology"],
-            ["-k",  "--keep-testing",         "",                 "Keep sending payloads, even if vulnerability is already detected"],
+            ["-g",  "--technology",            "<technology>",    "Set Technology"],
+            ["-k",  "--keep-testing",         "",                 "Keep sending payloads after a vulnerability is found"],
             ["-l",  "--start-local-server",   "<port>",           "Start local server on <port> (default 5000)"],
-            ["-v",  "--version",                "",               "Show script version and exit"],
-            ["-h",  "--help",                   "",               "Show this help message and exit"],
-            ["-j",  "--json",                   "",               "Output in JSON format"],
+            ["-vv", "--verbose",              "",                 "Print detailed output"],
+            ["-v",  "--version",              "",                 "Show script version and exit"],
+            ["-h",  "--help",                 "",                 "Show this help message and exit"],
+            ["-j",  "--json",                 "",                 "Output in JSON format"],
         ]
         }]
 
@@ -486,7 +488,7 @@ def parse_args() -> argparse.Namespace:
     exclusive = parser.add_mutually_exclusive_group(required=True)
     exclusive.add_argument("-u",  "--url",              type=str)
     exclusive.add_argument("-rf", "--request-file",     type=str)
-    parser.add_argument("-t",  "--tests",               type=str,  nargs="+")
+    parser.add_argument("-ts",  "--tests",               type=str,  nargs="+")
     parser.add_argument("-g",  "--technology",          type=str,  nargs="+", default=[])
     parser.add_argument("-a",  "--user_agent",          type=str)
     parser.add_argument("-vu", "--verification_url",    type=str)
@@ -496,6 +498,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("-d",  "--data",                type=str)
     parser.add_argument("-l",  "--start-local-server",  type=str, nargs="?", const="5000")
     parser.add_argument("-H",  "--headers",             type=ptmisclib.pairs, nargs="+")
+    parser.add_argument("-vv",  "--verbose",            action="store_true")
     parser.add_argument("-k",  "--keep-testing",        action="store_true")
     parser.add_argument("-j",  "--json",                action="store_true")
     parser.add_argument("-v",  "--version",             action="version", version=f"{SCRIPTNAME} {__version__}")
