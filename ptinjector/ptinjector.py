@@ -84,8 +84,11 @@ class PtInjector:
                     for payload_str in payload_object["payload"]:
                         if is_vulnerable and not self.keep_testing:
                             break
+                        if args.verbose:
+                            ptprinthelper.ptprint(f"Sending payload: {payload_str}", "", condition=(not self.use_json), end=f"\n", colortext=False, clear_to_eol=True, indent=4)
+                        else:
+                            ptprinthelper.ptprint(f"Sending payload: {payload_str[:80] + '...' if len(payload_str) > 100 else payload_str}", "", condition=(not self.use_json), end=f"\r", colortext=False, clear_to_eol=True, indent=4)
 
-                        ptprinthelper.ptprint(f"Sending payload: {payload_str}", "", condition=(args.verbose and not self.use_json), end=f"\n", colortext=False, clear_to_eol=True, indent=4)
                         try:
                             response, dump = self._send_payload(request_data.get("url"), payload_str, request_data)
                         except requests.exceptions.RequestException as e:
@@ -102,7 +105,7 @@ class PtInjector:
                             if is_vulnerable and not self.keep_testing:
                                 break
 
-                    if is_vulnerable and args.verbose:
+                    if is_vulnerable:
                         ptprinthelper.ptprint(f"Payload executed: {payload_str}", "VULN", not self.use_json, end="\n", colortext=False, clear_to_eol=True, indent=4)
                         #ptprinthelper.ptprint(f"Parameter <{ptprinthelper.get_colored_text(request_data['parameter'], 'TITLE')}> seems to be vulnerable to {vulnerability_description}", "VULN", condition=not self.use_json and not self.keep_testing, colortext=False, clear_to_eol=True, indent=4)
                         if self.keep_testing:
