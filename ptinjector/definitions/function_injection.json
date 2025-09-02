@@ -1,14 +1,5 @@
 {
     "description": "Function Injection",
     "vulnerability": "function_injection",
-    "payloads": [
-        {
-            "payload": "/etc/passwd",
-            "verify": [
-                "foo"
-            ],
-            "type": "html",
-            "technology": ["apache"]
-        }
-    ]
+    "payloads": []
 }

