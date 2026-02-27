@@ -200,26 +200,15 @@ class PtInjector:
     def verify_time(self, response, verification_list):
         """Pokud response odpovedi trva dele nez cas uvedeny v definici, je to zranitelne."""
 
-        def custom_sort_key(item):
-        # Try to convert the item to an integer for sorting
-            try:
-                # Assuming the item is a string that can represent an integer
-                return (0, -int(item))  # Negative for descending order
-            except ValueError:
-                # Item is not a number, so sort as a string
-                return (1, item)
-
-        verification_list.sort(key=custom_sort_key)
-
-        if not verification_list[0].isdigit():
-            print(verification_list, "Invalid definitions")
+        if len(verification_list) != 1:
+            print(verification_list, "Invalid definition: 'verify' field in vuln. definition must contain a single number.")
             return False
-
-        if response.elapsed.total_seconds() > int(verification_list[0]):
-            print(True)
-
-            ptprinthelper.ptprint("Zranitelne na Time-based", "VULN", not self.use_json, colortext=True)
-            return True
+        try:
+            vulnerable_time = float(verification_list[0])
+        except ValueError:
+            print(verification_list, "Invalid definition: 'verify' field in vuln. definition must contain a valid number.")
+            return False
+        return vulnerable_time <= response.elapsed.total_seconds()
 
     def verify_boolean(self, response, definition):
         try:
