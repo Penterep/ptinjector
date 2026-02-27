@@ -61,7 +61,6 @@ class PtInjector:
         # Iterate specified tests
         for vulnerability_name in self.LOADED_DEFINITIONS.keys():
             is_vulnerable: bool = False
-            is_vulnerable_during_keep_testing = False
             definition_contents: dict = self.LOADED_DEFINITIONS[vulnerability_name]
             vulnerability_description: str = definition_contents.get('description', vulnerability_name)
             confirmed_payloads = set()
@@ -93,46 +92,19 @@ class PtInjector:
                             response, dump = self._send_payload(request_data.get("url"), payload_str, request_data)
                         except requests.exceptions.RequestException as e:
                             self.ptjsonlib.end_error(f"Error connecting to {args.url}:", details=e ,condition=self.use_json)
-                        response.history.append(response) # Append final destination to the response history
 
-                        #if response.status_code != 200:
-                        #    ptprinthelper.ptprint(f"Status code: {response.status_code}", "TITLE", not self.use_json, colortext=False, clear_to_eol=True, newline_above=False)
-
-                        for response_object in response.history:
-                            is_vulnerable = self.check_if_vulnerable(response_object, payload_object)
-                            if self.keep_testing and is_vulnerable and not is_vulnerable_during_keep_testing:
-                                is_vulnerable_during_keep_testing = True
-                            if is_vulnerable and not self.keep_testing:
-                                break
-
-                    if is_vulnerable:
-                        ptprinthelper.ptprint(f"Payload executed: {payload_str}", "VULN", not self.use_json, end="\n", colortext=False, clear_to_eol=True, indent=4)
-                        #ptprinthelper.ptprint(f"Parameter <{ptprinthelper.get_colored_text(request_data['parameter'], 'TITLE')}> seems to be vulnerable to {vulnerability_description}", "VULN", condition=not self.use_json and not self.keep_testing, colortext=False, clear_to_eol=True, indent=4)
-                        if self.keep_testing:
+                        if is_vulnerable := self.check_if_vulnerable(response, payload_object):
                             confirmed_payloads.add(payload_str)
-                        self.ptjsonlib.add_vulnerability(definition_contents.get("vulnerability"), vuln_request=dump["request"], vuln_response=dump["response"])
-                        if not self.keep_testing:
-                            break
+                            self.ptjsonlib.add_vulnerability(definition_contents.get("vulnerability"), vuln_request=dump["request"], vuln_response=dump["response"])
 
-                # Results after for loop
-                if self.keep_testing:
-                    if is_vulnerable_during_keep_testing:
-                        ptprinthelper.ptprint(f"Vulnerable to {vulnerability_description}", "VULN", condition=not self.use_json, colortext=True, clear_to_eol=True, indent=4)
-                    else:
-                        ptprinthelper.ptprint(f"Not vulnerable to {vulnerability_description}", "OK", condition=not self.use_json, colortext=True, clear_to_eol=True, indent=4)
-                    """
-                    if confirmed_payloads:
-                        ptprinthelper.ptprint(f"Executed payloads:", "TITLE", condition=not self.use_json, colortext=True, clear_to_eol=True)
-                        ptprinthelper.ptprint("\n".join(confirmed_payloads), "TEXT", condition=not self.use_json, colortext=False)
-                    """
+                if not definition_contents.get("payloads", False):
+                    ptprinthelper.ptprint(f"No payloads available to test for {vulnerability_description} vulnerability", "NOTVULN", condition=not self.use_json, colortext=False, clear_to_eol=True)
+                elif confirmed_payloads:
+                    ptprinthelper.ptprint(f"Vulnerable to {vulnerability_description}", "VULN", condition=not self.use_json, colortext=True, clear_to_eol=True, indent=4)
+                    ptprinthelper.ptprint(f"Executed payloads:", "TITLE", condition=not self.use_json, colortext=True, clear_to_eol=True)
+                    ptprinthelper.ptprint("\n".join(confirmed_payloads), "TEXT", condition=not self.use_json, colortext=False)
                 else:
-                    if definition_contents.get("payloads", []):
-                        if is_vulnerable:
-                            ptprinthelper.ptprint(f"Vulnerable to {vulnerability_description}", "VULN", condition=not self.use_json, colortext=True, clear_to_eol=True, indent=4)
-                        else:
-                            ptprinthelper.ptprint(f"Not vulnerable to {vulnerability_description}", "OK", condition=not self.use_json, colortext=True, clear_to_eol=True, indent=4)
-                    else:
-                        ptprinthelper.ptprint(f"No payloads available to test for {vulnerability_description} vulnerability", "NOTVULN", condition=not self.use_json, colortext=False, clear_to_eol=True)
+                    ptprinthelper.ptprint(f"Not vulnerable to {vulnerability_description}", "OK", condition=not self.use_json, colortext=True, clear_to_eol=True, indent=4)
 
         ptprinthelper.ptprint("Finished", "TITLE", condition=not self.use_json, clear_to_eol=True, newline_above=True)
         if self.use_json:
@@ -144,6 +116,7 @@ class PtInjector:
         """Verify if payload was executed"""
         payload_type = payload_object.get("type").upper()
         verification_list = payload_object.get("verify")
+        is_vulnerable: bool = False
 
         if payload_type == "HTML_TAG":
             is_vulnerable = self.verify_html_tags(response, verification_list)
@@ -181,6 +154,8 @@ class PtInjector:
         if soup.find_all(verification_list):
             return True
 
+        return False
+
     def verify_html_attrs(self, response, verification_list: list):
         """See if any HTML attribute reflects <definition["verify"]>"""
         # TODO: Call fnc is_safe_to_parse()
@@ -191,11 +166,15 @@ class PtInjector:
                     if verification_str == attr:
                         return True
 
+        return False
+
     def verify_regex(self, response: requests.Response, verification_list: list):
         """Check if <verification_re> in <response.text>"""
         for verification_re in verification_list:
             if re.search(verification_re, response.text):
                 return True
+
+        return False
 
     def verify_time(self, response, verification_list):
         """Pokud response odpovedi trva dele nez cas uvedeny v definici, je to zranitelne."""
