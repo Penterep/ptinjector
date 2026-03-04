@@ -37,11 +37,23 @@ from ptlibs.parsers.http_request_parser import HttpRequestParser
 from _version import __version__
 from definitions._loader import DefinitionsLoader
 
+
+def header_list_to_dict(args):
+    headers_dict = dict()
+    if args.headers is None:
+        return headers_dict
+
+    for header_lst in args.headers:
+        for header in header_lst:
+            header_name, header_value = map(str.strip, header.split(":"))
+            headers_dict[header_name] = header_value
+    return headers_dict
+
 class PtInjector:
     def __init__(self, args):
         self.ptjsonlib: object                              = ptjsonlib.PtJsonLib()
         self.use_json: bool                                 = args.json
-        self.http_headers                                   = ptnethelper.get_request_headers(args)
+        self.http_headers                                   = header_list_to_dict(args)
         self.proxy: dict                                    = {"http": args.proxy, "https": args.proxy}
         self.parameter: str                                 = args.parameter
         self.keep_testing                                   = args.keep_testing
@@ -92,7 +104,6 @@ class PtInjector:
                             response, dump = self._send_payload(request_data.get("url"), payload_str, request_data)
                         except requests.exceptions.RequestException as e:
                             self.ptjsonlib.end_error(f"Error connecting to {args.url}:", details=e ,condition=self.use_json)
-
                         if is_vulnerable := self.check_if_vulnerable(response, payload_object):
                             confirmed_payloads.add(payload_str)
                             self.ptjsonlib.add_vulnerability(definition_contents.get("vulnerability"), vuln_request=dump["request"], vuln_response=dump["response"])
@@ -105,6 +116,7 @@ class PtInjector:
                     ptprinthelper.ptprint("\n".join(confirmed_payloads), "TEXT", condition=not self.use_json, colortext=False)
                 else:
                     ptprinthelper.ptprint(f"Not vulnerable to {vulnerability_description}", "OK", condition=not self.use_json, colortext=True, clear_to_eol=True, indent=4)
+                confirmed_payloads = []
 
         ptprinthelper.ptprint("Finished", "TITLE", condition=not self.use_json, clear_to_eol=True, newline_above=True)
         if self.use_json:
@@ -468,7 +480,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("-P",  "--parameter",           type=str)
     parser.add_argument("-d",  "--data",                type=str)
     parser.add_argument("-l",  "--start-local-server",  type=str, nargs="?", const="5000")
-    parser.add_argument("-H",  "--headers",             type=ptmisclib.pairs, nargs="+")
+    parser.add_argument("-H",  "--headers",             type=ptmisclib.pairs, nargs="+", action="append")
     parser.add_argument("-vv",  "--verbose",            action="store_true")
     parser.add_argument("-k",  "--keep-testing",        action="store_true")
     parser.add_argument("-j",  "--json",                action="store_true")
