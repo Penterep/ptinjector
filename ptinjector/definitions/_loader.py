@@ -35,18 +35,37 @@ class DefinitionsLoader:
         Raises:
             Exception: If no valid definitions are available.
         """
+        def has_specialized_payloads(definition_contents):
+            return "technology_specific_payloads" in definition_contents.keys()
+
+        def select_specific_payloads(definition_contents, technologies):
+            payloads = []
+            if not has_specialized_payloads(definition_contents):
+                return
+            if technologies:
+                definition_contents["payloads"][0]["payload"] = []
+
+            for pname, pvalues in definition_contents["technology_specific_payloads"].items():
+                if pname in technologies or technologies == []:
+                    for payload in pvalues:
+                        payloads.append(payload)
+            definition_contents["payloads"][0]["payload"].extend(payloads)
+            if not definition_contents["payloads"][0]["payload"]:
+                raise Exception(f"""
+    No specialized payloads for \"{technologies[0]}\" but there are {', '.join(map(str, definition_contents["technology_specific_payloads"].keys()))}""")
+
 
         loaded_definitions: dict = {}
         skipped_tests: list = []
         for definition_filename in self.available_definition_files:
             definition_name: str = definition_filename .split(".json")[0]
-
             # Determine if the current definition should be processed
             if specified_tests is None or definition_name in specified_tests or self.matches_specified_test(definition_name, specified_tests):
                 definition_contents = self._read_definition_file(definition_filename)
                 if self.validate_json_structure_and_values(definition_contents, definition_filename):
                     # Replace placeholders and add to loaded definitions
                     definition_contents = self.process_payloads_and_replace_placeholders(definition_contents)
+                    select_specific_payloads(definition_contents, self.technologies)
                     if definition_contents["payloads"]:
                         loaded_definitions.update({definition_name : definition_contents})
                     else:
