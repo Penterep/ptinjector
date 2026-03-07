@@ -49,6 +49,12 @@ def header_list_to_dict(args):
             headers_dict[header_name] = header_value
     return headers_dict
 
+
+def prepare_context(definition_contents):
+    # TODO
+    return dict()
+
+
 class PtInjector:
     def __init__(self, args):
         self.ptjsonlib: object                              = ptjsonlib.PtJsonLib()
@@ -64,6 +70,34 @@ class PtInjector:
         self.URL_PLACEHOLDER_INDEX: int                     = -1
         self.LOADED_DEFINITIONS: dict                       = self.load_definitions(args, random_string=self.RANDOM_STRING)
         self.request_parser: object                         = HttpRequestParser(ptjsonlib=self.ptjsonlib, use_json=self.use_json, placeholder=self.PLACEHOLDER_SYMBOL)
+        self.args                                                       = args
+
+
+    def run_payload_str(self, request_data, payload_str):
+        if self.args.verbose:
+            ptprinthelper.ptprint(f"Sending payload: {payload_str}", "", condition=(not self.use_json), end=f"\n", colortext=False, clear_to_eol=True, indent=4)
+        else:
+            ptprinthelper.ptprint(f"Sending payload: {payload_str[:80] + '...' if len(payload_str) > 100 else payload_str}", "", condition=(not self.use_json), end=f"\r", colortext=False, clear_to_eol=True, indent=4)
+        try:
+            response, dump = self._send_payload(request_data.get("url"), payload_str, request_data)
+            return response, dump
+        except requests.exceptions.RequestException as e:
+            self.ptjsonlib.end_error(f"Error connecting to {self.args.url}:", details=e ,condition=self.use_json)
+
+
+    def run_payload_object(self, payload_object, definition_contents, request_data, vulnerability_name):
+        context: dict = prepare_context(definition_contents)
+        confirmed_payloads = list()
+        for payload_str in payload_object["payload"]:
+            if confirmed_payloads and not self.keep_testing:
+                break
+            response, dump = self.run_payload_str(request_data, payload_str)
+            if self.check_if_vulnerable(response, payload_object):
+                confirmed_payloads.append(payload_str)
+                self.ptjsonlib.add_vulnerability(definition_contents.get("vulnerability"), vuln_request=dump["request"], vuln_response=dump["response"])
+
+        return confirmed_payloads
+
 
     def run(self, args):
         """Main method"""
@@ -71,11 +105,9 @@ class PtInjector:
         #ptprinthelper.ptprint(f"Target URL: {args.url}", "TITLE", colortext=True, condition=not self.use_json)
 
         # Iterate specified tests
-        for vulnerability_name in self.LOADED_DEFINITIONS.keys():
-            is_vulnerable: bool = False
-            definition_contents: dict = self.LOADED_DEFINITIONS[vulnerability_name]
+        for vulnerability_name, definition_contents in self.LOADED_DEFINITIONS.items():
             vulnerability_description: str = definition_contents.get('description', vulnerability_name)
-            confirmed_payloads = set()
+            confirmed_payloads = list()
 
             self.is_valid_request(args)
             # TODO: Test stability of server
@@ -86,37 +118,24 @@ class PtInjector:
 
             # Test parameter loop
             for request_data in self.generate_request_data(args):
-                parameter_name = request_data["parameter"]
-                is_vulnerable: bool = False
                 ptprinthelper.ptprint(f"Testing parameter: <{ptprinthelper.get_colored_text(request_data['parameter'], 'TITLE')}>", "TITLE", not self.use_json, colortext=False, clear_to_eol=True, newline_above=False)
 
                 # Iterate available payloads
                 for payload_object in definition_contents.get("payloads", []):
-                    for payload_str in payload_object["payload"]:
-                        if is_vulnerable and not self.keep_testing:
-                            break
-                        if args.verbose:
-                            ptprinthelper.ptprint(f"Sending payload: {payload_str}", "", condition=(not self.use_json), end=f"\n", colortext=False, clear_to_eol=True, indent=4)
-                        else:
-                            ptprinthelper.ptprint(f"Sending payload: {payload_str[:80] + '...' if len(payload_str) > 100 else payload_str}", "", condition=(not self.use_json), end=f"\r", colortext=False, clear_to_eol=True, indent=4)
+                    confirmed_payloads.extend(self.run_payload_object(payload_object, definition_contents, request_data, vulnerability_name))
+                    if confirmed_payloads and not self.keep_testing:
+                        break
 
-                        try:
-                            response, dump = self._send_payload(request_data.get("url"), payload_str, request_data)
-                        except requests.exceptions.RequestException as e:
-                            self.ptjsonlib.end_error(f"Error connecting to {args.url}:", details=e ,condition=self.use_json)
-                        if is_vulnerable := self.check_if_vulnerable(response, payload_object):
-                            confirmed_payloads.add(payload_str)
-                            self.ptjsonlib.add_vulnerability(definition_contents.get("vulnerability"), vuln_request=dump["request"], vuln_response=dump["response"])
+            if not definition_contents.get("payloads", False):
+                ptprinthelper.ptprint(f"No payloads available to test for {vulnerability_description} vulnerability", "NOTVULN", condition=not self.use_json, colortext=False, clear_to_eol=True)
+            elif confirmed_payloads:
+                ptprinthelper.ptprint(f"Vulnerable to {vulnerability_description}", "VULN", condition=not self.use_json, colortext=True, clear_to_eol=True, indent=4)
+                ptprinthelper.ptprint(f"Executed payloads:", "TITLE", condition=not self.use_json, colortext=True, clear_to_eol=True)
+                ptprinthelper.ptprint("\n".join(confirmed_payloads), "TEXT", condition=not self.use_json, colortext=False)
+            else:
+                ptprinthelper.ptprint(f"Not vulnerable to {vulnerability_description}", "OK", condition=not self.use_json, colortext=True, clear_to_eol=True, indent=4)
+            confirmed_payloads = []
 
-                if not definition_contents.get("payloads", False):
-                    ptprinthelper.ptprint(f"No payloads available to test for {vulnerability_description} vulnerability", "NOTVULN", condition=not self.use_json, colortext=False, clear_to_eol=True)
-                elif confirmed_payloads:
-                    ptprinthelper.ptprint(f"Vulnerable to {vulnerability_description}", "VULN", condition=not self.use_json, colortext=True, clear_to_eol=True, indent=4)
-                    ptprinthelper.ptprint(f"Executed payloads:", "TITLE", condition=not self.use_json, colortext=True, clear_to_eol=True)
-                    ptprinthelper.ptprint("\n".join(confirmed_payloads), "TEXT", condition=not self.use_json, colortext=False)
-                else:
-                    ptprinthelper.ptprint(f"Not vulnerable to {vulnerability_description}", "OK", condition=not self.use_json, colortext=True, clear_to_eol=True, indent=4)
-                confirmed_payloads = []
 
         ptprinthelper.ptprint("Finished", "TITLE", condition=not self.use_json, clear_to_eol=True, newline_above=True)
         if self.use_json:
