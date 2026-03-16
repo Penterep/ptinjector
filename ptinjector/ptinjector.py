@@ -38,8 +38,12 @@ from _version import __version__
 from definitions._loader import DefinitionsLoader
 
 
-def header_list_to_dict(args):
+def headers_cookies_prepare(args):
     headers_dict = dict()
+    if args.cookie:
+        args.cookie = "Cookie: " + ";".join([c for cookies in args.cookie for c in cookies])
+        headers_dict["Cookie"] = args.cookie
+
     if args.headers is None:
         return headers_dict
 
@@ -59,7 +63,7 @@ class PtInjector:
     def __init__(self, args):
         self.ptjsonlib: object                              = ptjsonlib.PtJsonLib()
         self.use_json: bool                                 = args.json
-        self.http_headers                                   = header_list_to_dict(args)
+        self.http_headers                                   = headers_cookies_prepare(args)
         self.proxy: dict                                    = {"http": args.proxy, "https": args.proxy}
         self.parameter: str                                 = args.parameter
         self.keep_testing                                   = args.keep_testing
@@ -495,7 +499,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("-a",  "--user_agent",          type=str)
     parser.add_argument("-vu", "--verification_url",    type=str)
     parser.add_argument("-p",  "--proxy",               type=str)
-    parser.add_argument("-c",  "--cookie",              type=str)
+    parser.add_argument("-c",  "--cookie",              type=str, nargs="+", action="append")
     parser.add_argument("-P",  "--parameter",           type=str)
     parser.add_argument("-d",  "--data",                type=str)
     parser.add_argument("-l",  "--start-local-server",  type=str, nargs="?", const="5000")
@@ -512,6 +516,7 @@ def parse_args() -> argparse.Namespace:
         sys.exit(0)
 
     args = parser.parse_args()
+
     args.request_file = os.path.abspath(os.path.join(os.path.dirname(__file__), args.request_file)) if args.request_file else None
     ptprinthelper.print_banner(SCRIPTNAME, __version__, args.json, space=0)
     return args
