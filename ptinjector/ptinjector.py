@@ -44,6 +44,9 @@ def headers_cookies_prepare(args):
         args.cookie = "Cookie: " + ";".join([c for cookies in args.cookie for c in cookies])
         headers_dict["Cookie"] = args.cookie
 
+    if args.data:
+        headers_dict["Content-Type"] = "application/x-www-form-urlencoded"
+
     if args.headers is None:
         return headers_dict
 
