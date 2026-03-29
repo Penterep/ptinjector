@@ -28,7 +28,7 @@ import time
 import tempfile
 import urllib
 from typing import Tuple
-
+import importlib
 import requests
 from bs4 import BeautifulSoup
 from ptlibs import ptprinthelper, ptmisclib, ptjsonlib, ptnethelper, ptcharsethelper
@@ -57,11 +57,6 @@ def headers_cookies_prepare(args):
     return headers_dict
 
 
-def prepare_context(definition_contents):
-    # TODO
-    return dict()
-
-
 class PtInjector:
     def __init__(self, args):
         self.ptjsonlib: object                              = ptjsonlib.PtJsonLib()
@@ -77,7 +72,31 @@ class PtInjector:
         self.URL_PLACEHOLDER_INDEX: int                     = -1
         self.LOADED_DEFINITIONS: dict                       = self.load_definitions(args, random_string=self.RANDOM_STRING)
         self.request_parser: object                         = HttpRequestParser(ptjsonlib=self.ptjsonlib, use_json=self.use_json, placeholder=self.PLACEHOLDER_SYMBOL)
-        self.args                                           = args
+        self.args                                                      = args
+        self.modules                                               = self.load_modules("modules/")
+
+    def load_modules(self, path: str):
+        "loads from path, modules for testing different vulnerabilities, each should implement run() and check_if_vulnerable(), otherwise the defaults are used"
+
+        module_names = [f[:-3] for f in os.listdir(path) if os.path.isfile(os.path.join(path, f)) and not f[0] == '_' and f[-3:] == ".py"]
+        modules = dict()
+
+        for name in module_names:
+            spec = importlib.util.spec_from_file_location(name, os.path.join(path, f"{name}.py"))
+            modules[name] = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(modules[name])
+
+        for mod in modules:
+            try:
+                modules[mod].run
+            except AttributeError as e:
+                modules[mod].run = DefaultVulnerability.run
+            try:
+                modules[mod].check_if_vulnerable
+            except AttributeError as e:
+                modules[mod].check_if_vulnerable = DefaultVulnerability.check_if_vulnerable
+
+        return modules
 
 
     def run_payload_str(self, request_data, payload_str):
@@ -86,22 +105,24 @@ class PtInjector:
         else:
             ptprinthelper.ptprint(f"Sending payload: {payload_str[:80] + '...' if len(payload_str) > 100 else payload_str}", "", condition=(not self.use_json), end=f"\r", colortext=False, clear_to_eol=True, indent=4)
         try:
-            response, dump = self._send_payload(request_data.get("url"), payload_str, request_data)
+            response, dump = self._send_payload(payload_str, request_data)
             return response, dump
         except requests.exceptions.RequestException as e:
             self.ptjsonlib.end_error(f"Error connecting to {self.args.url}:", details=e ,condition=self.use_json)
 
 
     def run_payload_object(self, payload_object, definition_contents, request_data, vulnerability_name):
-        context: dict = prepare_context(definition_contents)
         confirmed_payloads = list()
-        for payload_str in payload_object["payload"]:
-            if confirmed_payloads and not self.keep_testing:
-                break
-            response, dump = self.run_payload_str(request_data, payload_str)
-            if self.check_if_vulnerable(response, payload_object):
-                confirmed_payloads.append(payload_str)
-                self.ptjsonlib.add_vulnerability(definition_contents.get("vulnerability"), vuln_request=dump["request"], vuln_response=dump["response"])
+        mod = self.modules.get(payload_object["type"], DefaultVulnerability)
+        try:
+            for payloads, responses, dump in mod.run(payload_object, definition_contents, request_data, injector=self):
+                if confirmed_payloads and not self.keep_testing:
+                    break
+                if mod.check_if_vulnerable(responses, payload_object.get('verify', []), self):
+                    confirmed_payloads.extend(payloads)
+                    self.ptjsonlib.add_vulnerability(definition_contents.get("vulnerability"), vuln_request=dump["request"], vuln_response=dump["response"])
+        except requests.exceptions.RequestException as e:
+            self.ptjsonlib.end_error(f"Error connecting to {self.args.url}:", details=e ,condition=self.use_json)
 
         return confirmed_payloads
 
@@ -150,94 +171,7 @@ class PtInjector:
             print(self.ptjsonlib.get_result_json())
 
 
-    def check_if_vulnerable(self, response, payload_object: dict) -> bool:
-        """Verify if payload was executed"""
-        payload_type = payload_object.get("type").upper()
-        verification_list = payload_object.get("verify")
-        is_vulnerable: bool = False
-
-        if payload_type == "HTML_TAG":
-            is_vulnerable = self.verify_html_tags(response, verification_list)
-        elif payload_type == "HTML_ATTR":
-            is_vulnerable = self.verify_html_attrs(response, verification_list)
-        elif payload_type == "REGEX":
-            is_vulnerable = self.verify_regex(response, verification_list)
-        elif payload_type == "TIME":
-            is_vulnerable = self.verify_time(response, verification_list)
-        elif payload_type == "BOOLEAN":
-            is_vulnerable = self.verify_boolean(response, verification_list)
-        elif payload_type == "HEADER":
-            is_vulnerable = self.verify_headers(response, verification_list)
-        elif payload_type == "REQUEST":
-            is_vulnerable = self.verify_request()
-        else:
-            return
-        return is_vulnerable
-
-    def verify_request(self):
-        """Verify request type payloads"""
-        # Send requests to /verify endpoint of verification-url.
-        try:
-            res, dump = self._send_payload(self.VERIFICATION_URL, "")
-            if res.json().get("msg") == "true":
-                return True
-        except requests.exceptions.RequestException as e:
-            self.ptjsonlib.end_error(f"Error connecting to {self.VERIFICATION_URL}", details=e, condition=self.use_json)
-            return False
-
-    def verify_html_tags(self, response, verification_list: list):
-        """Returns True if definition['verify'] in <response> text"""
-        # TODO: Call fnc is_safe_to_parse()
-        soup = BeautifulSoup(response.text, "html5lib")
-        if soup.find_all(verification_list):
-            return True
-
-        return False
-
-    def verify_html_attrs(self, response, verification_list: list):
-        """See if any HTML attribute reflects <definition["verify"]>"""
-        # TODO: Call fnc is_safe_to_parse()
-        soup = BeautifulSoup(response.text, "html5lib")
-        for tag in soup.find_all(True):  # True finds all tags
-            for attr, value in tag.attrs.items():
-                for verification_str in verification_list:
-                    if verification_str == attr:
-                        return True
-
-        return False
-
-    def verify_regex(self, response: requests.Response, verification_list: list):
-        """Check if <verification_re> in <response.text>"""
-        for verification_re in verification_list:
-            if re.search(verification_re, response.text):
-                return True
-
-        return False
-
-    def verify_time(self, response, verification_list):
-        """Pokud response odpovedi trva dele nez cas uvedeny v definici, je to zranitelne."""
-
-        if len(verification_list) != 1:
-            print(verification_list, "Invalid definition: 'verify' field in vuln. definition must contain a single number.")
-            return False
-        try:
-            vulnerable_time = float(verification_list[0])
-        except ValueError:
-            print(verification_list, "Invalid definition: 'verify' field in vuln. definition must contain a valid number.")
-            return False
-        return vulnerable_time <= response.elapsed.total_seconds()
-
-    def verify_boolean(self, response, definition):
-        try:
-            if response.elapsed.total_seconds() > definition["verify"][0]:
-                return True
-        except:
-            return False
-
-    def verify_headers(self, response, verification_list: list):
-        return True if any([any(verification_string in header_name for verification_string in verification_list) for header_name in response.headers.keys()]) else False
-
-    def _send_payload(self, url: str, payload: str, rdata=None) -> requests.models.Response:
+    def _send_payload(self, payload: str, rdata=None) -> requests.models.Response:
         """Send <payload> to <url>"""
 
         param, url, http_method, headers, data = rdata["parameter"], rdata["url"], rdata["method"], rdata["headers"], rdata["data"]
@@ -525,6 +459,22 @@ def parse_args() -> argparse.Namespace:
     ptprinthelper.print_banner(SCRIPTNAME, __version__, args.json, space=0)
     return args
 
+
+class DefaultVulnerability:
+    @staticmethod
+    def run(payload_object, definition_contents, request_data, injector: PtInjector):
+        for payload_str in payload_object["payload"]:
+            response, dump = injector.run_payload_str(request_data, payload_str)
+            yield [payload_str], [response], dump
+
+    @staticmethod
+    def check_if_vulnerable(responses, verification_list, injector: PtInjector):
+        # verification_list = payload_object.get("verify")
+        response = responses.pop()
+        """Check if <verification_re> in <response.text>"""
+        verification_re = '(' + ')|('.join(verification_list) + ')'
+        verification_re = re.compile(verification_re)
+        return bool(re.search(verification_re, response.text))
 
 def main():
     global SCRIPTNAME
