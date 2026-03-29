@@ -77,7 +77,7 @@ class PtInjector:
         self.URL_PLACEHOLDER_INDEX: int                     = -1
         self.LOADED_DEFINITIONS: dict                       = self.load_definitions(args, random_string=self.RANDOM_STRING)
         self.request_parser: object                         = HttpRequestParser(ptjsonlib=self.ptjsonlib, use_json=self.use_json, placeholder=self.PLACEHOLDER_SYMBOL)
-        self.args                                                       = args
+        self.args                                           = args
 
 
     def run_payload_str(self, request_data, payload_str):
@@ -435,7 +435,8 @@ class PtInjector:
 
         def parse_and_yield_request(parameter_name, http_request):
             """Parses the HTTP request and yields a dictionary with request data components."""
-            url, method, headers, request_data = self.request_parser.parse_http_request(http_request=http_request)
+            scheme = self.args.url.split("://")[0] if self.args.url else "http"
+            url, method, headers, request_data = self.request_parser.parse_http_request(http_request=http_request, scheme=scheme)
             yield {"parameter": parameter_name, "url": url, "method": method, "headers": headers, "data": request_data}
 
         # Generování požadavků na základě přítomných parametrů
