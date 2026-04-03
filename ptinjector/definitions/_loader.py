@@ -7,15 +7,30 @@ from ptlibs import ptprinthelper
 from typing import Optional, List
 
 class DefinitionsLoader:
-    def __init__(self, use_json: bool = False, random_string: str = None, verification_url: str = None, technologies: list = []):
-        self.use_json = use_json
+    def __init__(self, args, random_string):
+        self.use_json = args.json
         self.RANDOM_CODE: str = random_string
-        self.verification_url: str = verification_url
-        self.technologies: list = [technology.lower() for technology in technologies if technologies]
+        self.verification_url: str = args.verification_url
+        self.technologies: set = set([technology.lower() for technology in args.technology if args.technology])
         self.folder_path: str = os.path.dirname(__file__)
-        self.available_definition_files: list = [f for f in sorted(os.listdir(self.folder_path)) if (os.path.join(self.folder_path, f) and (not f.startswith("_") and f.endswith(".json")))]
+        self.available_definition_files: list = self.get_definition_files(args.tests)
 
-    def load_definitions(self, specified_tests: Optional[List[str]]) -> dict:
+
+    def get_definition_files(self, tests: list):
+
+        def is_payload_name(s: str, prefixes: List[str] = ['']) -> bool:
+            result: bool = s[0] != '_' and s[0] != '.' and s[-5:] == '.json'
+            if prefixes:
+                result = result and any(s.startswith(prefix) for prefix in prefixes)
+            return result
+
+        filenames = sorted([
+                f for f in os.listdir(self.folder_path)
+                if is_payload_name(f, tests) and os.path.isfile(os.path.join(self.folder_path, f))
+        ])
+        return filenames
+
+    def load_definitions(self) -> dict:
         """
         Load and validate JSON definitions from available files.
 
@@ -35,44 +50,39 @@ class DefinitionsLoader:
         Raises:
             Exception: If no valid definitions are available.
         """
-        def has_specialized_payloads(definition_contents):
-            return "technology_specific_payloads" in definition_contents.keys()
+        def gettags(d: dict) -> set:
+            assert d is not None
+            return set(d.get('tags', {}))
 
-        def select_specific_payloads(definition_contents, technologies):
-            payloads = []
-            if not has_specialized_payloads(definition_contents):
-                return
-            if technologies:
-                definition_contents["payloads"][0]["payload"] = []
 
-            for pname, pvalues in definition_contents["technology_specific_payloads"].items():
-                if pname in technologies or technologies == []:
-                    for payload in pvalues:
-                        payloads.append(payload)
-            definition_contents["payloads"][0]["payload"].extend(payloads)
-            if not definition_contents["payloads"][0]["payload"]:
-                raise Exception(f"""
-    No specialized payloads for \"{technologies[0]}\" but there are {', '.join(map(str, definition_contents["technology_specific_payloads"].keys()))}""")
+        def make_tag_checker(tags: set):
+            if tags is None:
+                return set()
+            return lambda x: tags == {} or gettags(x).intersection(tags)
 
+
+        def take_by_tags(ds, tags):
+            return list(filter(make_tag_checker(tags), ds))
 
         loaded_definitions: dict = {}
         skipped_tests: list = []
         for definition_filename in self.available_definition_files:
             definition_name: str = definition_filename .split(".json")[0]
-            # Determine if the current definition should be processed
-            if specified_tests is None or definition_name in specified_tests or self.matches_specified_test(definition_name, specified_tests):
-                definition_contents = self._read_definition_file(definition_filename)
-                if self.validate_json_structure_and_values(definition_contents, definition_filename):
-                    # Replace placeholders and add to loaded definitions
-                    definition_contents = self.process_payloads_and_replace_placeholders(definition_contents)
-                    select_specific_payloads(definition_contents, self.technologies)
-                    if definition_contents["payloads"]:
-                        loaded_definitions.update({definition_name : definition_contents})
-                    else:
-                        skipped_tests.append(definition_filename.split(".json")[0].replace("_", " ").upper())
+            definition_contents = self._read_definition_file(definition_filename)
+            if not self.validate_json_structure_and_values(definition_contents, definition_filename):
+                skipped_tests.append(definition_filename)
+                continue
 
-        #if skipped_tests:
-        #    ptprinthelper.ptprint(f"Skipped tests: {', '.join(skipped_tests)} - definitions do not contain any valid payloads.", "WARNING", condition=not self.use_json)
+            if self.technologies:
+                definition_contents['payloads'] = take_by_tags(definition_contents['payloads'], self.technologies)
+
+            # Replace placeholders and add to loaded definitions
+            definition_contents = self.process_payloads_and_replace_placeholders(definition_contents)
+            loaded_definitions.update({definition_name : definition_contents})
+
+
+        if skipped_tests:
+            ptprinthelper.ptprint(f"Skipped tests: {', '.join(skipped_tests)} - definitions do not contain any valid payloads.", "WARNING", condition=not self.use_json)
 
         if loaded_definitions:
             ptprinthelper.ptprint(f" ", "TEXT", condition=not self.use_json)

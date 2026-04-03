@@ -155,7 +155,7 @@ class PtInjector:
                         break
 
             if not definition_contents.get("payloads", False):
-                ptprinthelper.ptprint(f"No payloads available to test for {vulnerability_description} vulnerability", "NOTVULN", condition=not self.use_json, colortext=False, clear_to_eol=True)
+                ptprinthelper.ptprint(f"No payloads available to test for {vulnerability_description} vulnerability" + bool(self.args.technology) * f" with chosen technology: {", ".join(self.args.technology)}", "WARNING", condition=not self.use_json, colortext=False, clear_to_eol=True)
             elif confirmed_payloads:
                 ptprinthelper.ptprint(f"Vulnerable to {vulnerability_description}", "VULN", condition=not self.use_json, colortext=True, clear_to_eol=True, indent=4)
                 ptprinthelper.ptprint(f"Executed payloads:", "TITLE", condition=not self.use_json, colortext=True, clear_to_eol=True, indent=4)
@@ -317,7 +317,8 @@ class PtInjector:
     def load_definitions(self, args, random_string: str):
         """Load Definitions. <random_string> is for replacing placeholders inside."""
         try:
-            return DefinitionsLoader(use_json=args.json, random_string=random_string, verification_url=args.verification_url, technologies=args.technology).load_definitions(args.tests)
+            DL = DefinitionsLoader(args, random_string=self.RANDOM_STRING)
+            return DL.load_definitions()
         except Exception as exc:
             self.ptjsonlib.end_error(f"{exc}, program will exit.", self.use_json)
 
@@ -434,7 +435,7 @@ def parse_args() -> argparse.Namespace:
     exclusive.add_argument("-u",  "--url",              type=str)
     exclusive.add_argument("-rf", "--request-file",     type=str)
     parser.add_argument("-ts",  "--tests",               type=str,  nargs="+")
-    parser.add_argument("-g",  "--technology",          type=str,  nargs="+", default=[])
+    parser.add_argument("-g",  "--technology",          type=str,  nargs="+", default=set())
     parser.add_argument("-a",  "--user_agent",          type=str)
     parser.add_argument("-vu", "--verification_url",    type=str)
     parser.add_argument("-p",  "--proxy",               type=str)
