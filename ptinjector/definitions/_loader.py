@@ -3,7 +3,7 @@ import os
 import json
 
 from ptlibs import ptprinthelper
-
+from payloadgenerator import prepare_templates
 from typing import Optional, List
 
 class DefinitionsLoader:
@@ -78,6 +78,7 @@ class DefinitionsLoader:
 
             # Replace placeholders and add to loaded definitions
             definition_contents = self.process_payloads_and_replace_placeholders(definition_contents)
+            definition_contents['payloads'] = prepare_templates(definition_contents['payloads'])
             loaded_definitions.update({definition_name : definition_contents})
 
 
