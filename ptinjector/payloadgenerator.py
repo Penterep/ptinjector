@@ -210,7 +210,7 @@ def init_payload_generator(parse_list, variables):
     for i in range(n):
         encodings = get_var_values("encoding", variables)
         generated_payload = create_variant(parse_list, i)
-        if not encodings:
+        if not encodings or encodings == ['']:
 
             yield generated_payload
         else:
