@@ -69,7 +69,8 @@
             "tags":["mariadb", "mysql", "payload_template"],
             "vars":{
                 "QUOTE": ["'"],
-                "OP": ["and", "AND", "OR", "or"]
+                "OP": ["and", "AND", "OR", "or"],
+                "encoding": ["none", "quote"]
             }
         },
         {
