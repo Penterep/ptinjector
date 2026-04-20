@@ -1,1 +1,5 @@
 recursive-include ptinjector/definitions/ *
+recursive-include ptinjector/modules/ *
+recursive-include ptinjector/templates/ *
+recursive-include ptinjector/documentation/ *
+
