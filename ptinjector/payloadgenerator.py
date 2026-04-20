@@ -124,6 +124,8 @@ def parse_set(template_string):
 def parse_template_part(template_string):
     parse_list = []
     _, template_string = skipseparators(template_string)
+    if template_string == "":
+        return parse_literal("''")
     if template_string[0] == "'":
         return parse_literal(template_string)
     if template_string[0] == "{":
@@ -135,6 +137,7 @@ def parse_template_part(template_string):
 def parse_template(template_string):
     parse_list = []
 
+
     rest = template_string
     while rest:
         fragment, rest = parse_template_part(rest)
@@ -145,7 +148,7 @@ def parse_template(template_string):
 
 def get_var_values(variable, variables):
     global default_variables
-    return variables.get(variable, default_variables.get(variable, ""))
+    return variables.get(variable, default_variables.get(variable, [""]))
 
 
 def fillin_variables(parse_list, variables):
@@ -175,6 +178,7 @@ def fillin_variables(parse_list, variables):
 def init_payload_generator(parse_list, variables):
 
     parse_list = fillin_variables(parse_list, variables)
+
 
     def calculate_number_variants(parse_list):
         """Calculates how many payload template_strings are generated from given parse_list (and so correspond to 1 template template_string + provided variables)"""
@@ -207,6 +211,7 @@ def init_payload_generator(parse_list, variables):
         encodings = get_var_values("encoding", variables)
         generated_payload = create_variant(parse_list, i)
         if not encodings:
+
             yield generated_payload
         else:
             for encoding in encodings:

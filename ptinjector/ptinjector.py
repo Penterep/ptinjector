@@ -113,7 +113,7 @@ class PtInjector:
 
     def run_payload_object(self, payload_object, definition_contents, request_data, vulnerability_name):
         confirmed_payloads = list()
-        mod = self.modules.get(payload_object["type"], DefaultVulnerability)
+        mod = self.modules.get(payload_object["type"].upper(), DefaultVulnerability)
         try:
             for payloads, responses, dump in mod.run(payload_object, definition_contents, request_data, injector=self):
                 if confirmed_payloads and not self.keep_testing:
