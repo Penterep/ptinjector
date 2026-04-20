@@ -1,9 +1,48 @@
 import hashlib
 import random
 import string
+from random import choice
+from random import randint
 from typing import List
 from enum import Enum
 import json
+from urllib import parse
+
+
+
+def sh_obfuscate_spaces(payload_str: str):
+    """
+    Replaces spaces with random value which shell accepts instead of space.
+    """
+    space_replacement = choice(("${IFS}", "\r","\n", "\v" "\t", "$'\x20'", "$'\x09'", "$'\\x20'", "$'\\x09'"))
+    return payload_str.replace(" ", space_replacement)
+
+
+
+def encode_hex(payload_str: str):
+    tmplist = []
+    for c in payload_str:
+        tmplist.append(f"\\x{hex(ord(c))[2:]}")
+    return "".join(tmplist)
+
+
+def double_encode(payload_str: str):
+    def subencode(ch: chr):
+        if ch in string.punctuation:
+            return f"%25{hex(ord(ch))[2:]}"
+        return ch
+
+    return "".join(map(subencode, payload_str))
+
+encoders = {"quote_plus": parse.quote_plus, "quote": parse.quote, "none": lambda x: x,
+                        "double_encode": double_encode, "sh_obfuscate_spaces": sh_obfuscate_spaces
+}
+
+def encode_payload(payload_str: str, encoding: str = "none"):
+    global encoders
+    encoder = encoders.get(encoding, parse.quote_plus)
+    return encoder(payload_str)
+
 
 def random_word(length=15, alphabet=string.ascii_letters):
     return "".join([random.choice(alphabet) for _ in range(length)])
@@ -165,7 +204,15 @@ def init_payload_generator(parse_list, variables):
     n = calculate_number_variants(parse_list)
 
     for i in range(n):
-        yield create_variant(parse_list, i)
+        encodings = get_var_values("encoding", variables)
+        generated_payload = create_variant(parse_list, i)
+        if not encodings:
+            yield generated_payload
+        else:
+            for encoding in encodings:
+                encoded_payload_str = encode_payload(generated_payload, encoding)
+                yield encoded_payload_str
+
 
     return
 

@@ -92,3 +92,4 @@ Or defining our own variables:
 ```
 
 - variables: any unqoted string will be treated as a variable, first taken from `vars` if not found from defauls and it it is not there replaced with empty string, default variables are in the `default` file in templates/ directory.
+- control variables: are not put into the payload template string only to the `vars` dictionary. Currently there is only `encoding` control variable whose value should be list of "quote_plus", "quote", "none", "double_encode", "sh_obfuscate_spaces". If undefined encoding is used a default encoding is used. Defining it causes all generated payloads to be encoded for given payload object.
