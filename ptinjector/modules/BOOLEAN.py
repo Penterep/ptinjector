@@ -1,4 +1,3 @@
-import ptinjector
 from bs4 import BeautifulSoup as bsoup
 import hashlib
 
@@ -8,7 +7,7 @@ def get_md5(s: str):
     return h.digest()
 
 
-def run(payload_object, definition_contents, request_data, injector: ptinjector.PtInjector):
+def run(payload_object, definition_contents, request_data, injector):
     responses = []
     payloads = []
     for payload_str in payload_object["payload"]:
@@ -74,7 +73,7 @@ def increasing_limit_check(responses, verification_list):
     return differencesum == len(responses) - 1
 
 
-def check_if_vulnerable(responses, verification_list, injector: ptinjector.PtInjector):
+def check_if_vulnerable(responses, verification_list, injector):
     checks = {
         "equivalence_check": equivalence_check,
         "increasing_limit_check": increasing_limit_check

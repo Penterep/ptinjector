@@ -1,7 +1,6 @@
-import ptinjector
 
 
-def run(payload_object, definition_contents, request_data, injector: ptinjector.PtInjector):
+def run(payload_object, definition_contents, request_data, injector):
     responses = []
     payloads = []
     for payload_str in payload_object["payload"]:
@@ -9,7 +8,7 @@ def run(payload_object, definition_contents, request_data, injector: ptinjector.
         yield [payload_str], [response], dump
 
 
-def check_if_vulnerable(responses, verification_list, injector: ptinjector.PtInjector):
+def check_if_vulnerable(responses, verification_list, injector):
     """Pokud response odpovedi trva dele nez cas uvedeny v definici, je to zranitelne."""
     response = responses[0]
     if len(verification_list) != 1:
