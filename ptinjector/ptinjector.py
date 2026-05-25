@@ -317,8 +317,8 @@ class PtInjector:
     def load_definitions(self, args, random_string: str):
         """Load Definitions. <random_string> is for replacing placeholders inside."""
         try:
-            DL = DefinitionsLoader(args, random_string=self.RANDOM_STRING)
-            return DL.load_definitions()
+            self.DL = DefinitionsLoader(args, random_string=self.RANDOM_STRING)
+            return self.DL.load_definitions()
         except Exception as exc:
             self.ptjsonlib.end_error(f"{exc}, program will exit.", self.use_json)
 
@@ -393,7 +393,7 @@ class PtInjector:
                     break  # Konec při dosažení posledního parametru
 
 
-def get_help():
+def get_help(DL: DefinitionsLoader):
     return [
         {"description": ["ptinjector - Injection Vulnerabilities Testing Tool"]},
         {"usage": ["ptinjector <options>"]},
@@ -408,7 +408,7 @@ def get_help():
         {"options": [
             ["-u",  "--url",                   "<url>",           "Test URL"],
             ["-ts", "--test",      "<test>",                      "Specify one or more tests to perform:"],
-            *DefinitionsLoader().get_definitions_help(),
+            *DL.get_definitions_help(),
             ["",    "",                       "",                 ""],
             ["-rf", "--request_file",         "<request-file>",   "Set request-file.txt"],
             ["-d",  "--data",                 "<data>",           "Set request-data"],
@@ -450,11 +450,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("-v",  "--version",             action="version", version=f"{SCRIPTNAME} {__version__}")
     parser.add_argument("--placeholder",                type=str, default="<INJECT_HERE>")
 
-    if len(sys.argv) == 1 or "-h" in sys.argv or "--help" in sys.argv:
-        help = get_help()
-        ptprinthelper.help_print(help, SCRIPTNAME, __version__)
-        sys.exit(0)
-
     args = parser.parse_args()
 
     args.request_file = os.path.abspath(os.path.join(os.path.dirname(__file__), args.request_file)) if args.request_file else None
@@ -482,8 +477,17 @@ def main():
     global SCRIPTNAME
     SCRIPTNAME = "ptinjector"
     requests.packages.urllib3.disable_warnings()
+
     args = parse_args()
     script = PtInjector(args)
+
+    if len(sys.argv) == 1 or "-h" in sys.argv or "--help" in sys.argv:
+        help = get_help(script.DL)
+        ptprinthelper.help_print(help, SCRIPTNAME, __version__)
+        sys.exit(0)
+
+
+
     script.run(args)
 
 
