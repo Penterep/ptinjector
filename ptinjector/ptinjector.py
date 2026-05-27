@@ -73,7 +73,7 @@ class PtInjector:
         self.LOADED_DEFINITIONS: dict                       = self.load_definitions(args, random_string=self.RANDOM_STRING)
         self.request_parser: object                         = HttpRequestParser(ptjsonlib=self.ptjsonlib, use_json=self.use_json, placeholder=self.PLACEHOLDER_SYMBOL)
         self.args                                                      = args
-        self.modules                                               = self.load_modules("modules/")
+        self.modules                                               = self.load_modules(os.path.join(os.path.dirname(__file__), 'modules'))
 
     def load_modules(self, path: str):
         "loads from path, modules for testing different vulnerabilities, each should implement run() and check_if_vulnerable(), otherwise the defaults are used"
