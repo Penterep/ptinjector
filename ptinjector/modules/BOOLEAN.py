@@ -1,6 +1,7 @@
 from bs4 import BeautifulSoup as bsoup
 import hashlib
-
+import xml.etree.ElementTree as ET
+import json
 
 def get_md5(s: str):
     h = hashlib.new('md5', s.encode())
@@ -17,10 +18,74 @@ def run(payload_object, definition_contents, request_data, injector):
     yield payloads, responses, dump
 
 
-def tagset(response) -> set:
-    tmp_list = list(bsoup(response.text, 'html.parser').find_all('a'))
-    return {x.decode_contents() for x in tmp_list}
+def json_to_pathtags(loaded_json):
+    """"
+    Creates tags for easier comparasion of json content.
+    Ex:
+    {
+        "a": "Avalue",
+        "b":{
+            "c": "BCvalue"
+        }
+    }
+    ->
+    a: Avalue
+    b:c: BCvalue
+    """
+    result = []
+    keys = []
 
+    def recurse(current):
+        if type(current) in {str, int}:
+            result.append(":" + ":".join(keys) + str(current))
+            return
+        for k in current:
+            if type(current[k]) == str:
+                result.append(":".join(keys) + k + ": " + current[k])
+            elif type(current[k]) == list:
+                keys.append(k)
+                for e in current[k]:
+                    recurse(e)
+                keys.pop()
+            elif type(current[k]) == dict:
+                keys.append(k + ":")
+                recurse(current[k])
+                keys.pop()
+    # ignoring 'pathologicaly nested' json
+    try:
+        recurse(loaded_json)
+    except RecursionError:
+        pass
+
+    return set(result)
+
+def tagset(response) -> set:
+    content_type = response.headers['Content-Type']
+    if  content_type == 'text/html':
+        tmp_list = list(bsoup(response.text, 'html.parser').find_all('a'))
+        return {x.decode_contents() for x in tmp_list}
+    elif content_type in {"application/json", "text/x-json", "text/json"}:
+        return json_to_pathtags(json.loads(response.text))
+
+    elif content_type == "application/xml":
+        elements = set()
+        tree = ET.fromstring(response.text)
+        for elem in tree.iter():
+            elements.add((elem.tag, elem.text))
+        return elements
+
+    else:
+        return {response.content}
+
+
+def error_code_check(responses, verification_list):
+
+    if len(responses) < 5:
+        return False
+
+    status_codes = [r.status_code for r in responses]
+
+    return status_codes[1] == 200 and status_codes[2] == 200 and any(500 == round(sc, -2) for sc in status_codes)
 
 def equivalence_check(responses, verification_list):
     """
@@ -76,7 +141,8 @@ def increasing_limit_check(responses, verification_list):
 def check_if_vulnerable(responses, verification_list, injector):
     checks = {
         "equivalence_check": equivalence_check,
-        "increasing_limit_check": increasing_limit_check
+        "increasing_limit_check": increasing_limit_check,
+        "error_code_check": error_code_check
     }
     for verify_type in verification_list:
         check = checks.get(verify_type, False)
