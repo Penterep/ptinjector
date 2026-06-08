@@ -6,6 +6,11 @@ from ptlibs import ptprinthelper
 from payloadgenerator import prepare_templates
 from typing import Optional, List
 
+from ptlibs import ptprinthelper, ptmisclib, ptjsonlib, ptnethelper, ptcharsethelper
+from ptlibs.parsers.http_request_parser import HttpRequestParser
+from urllib.parse import urlparse
+
+
 class DefinitionsLoader:
     def __init__(self, args, random_string):
         self.use_json = args.json
@@ -14,8 +19,17 @@ class DefinitionsLoader:
         self.technologies: set = set([technology.lower() for technology in args.technology if args.technology])
         self.folder_path: str = os.path.dirname(__file__)
         self.available_definition_files: list = self.get_definition_files(args.tests)
-        self.TESTED_URL = args.url
+        if not args.request_file:
+            self.TESTED_URL = args.url
+        else:
+            self.ptjsonlib: object = ptjsonlib.PtJsonLib()
+            request_parser: object = HttpRequestParser(ptjsonlib=ptjsonlib, use_json=False, placeholder=args.placeholder)
 
+            f = open(args.request_file)
+            raw_request = f.read()
+            f.close()
+            url, method, headers, request_data = parse = request_parser.parse_http_request(raw_request)
+            self.TESTED_URL = urlparse(url).netloc
 
     def get_definition_files(self, tests: list):
 
