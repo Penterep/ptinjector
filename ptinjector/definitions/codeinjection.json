@@ -4,6 +4,12 @@
     "payloads": [
             {
             "payload": [
+                    "phpinfo",
+                    "PhpINFo",
+                    "PhpInfO",
+                    "phpinfO",
+                    "PHpinFo",
+                    "pHPiNFo",
                     "phpinfo();",
                     ";PhPInFO();",
                     "echo '[RANDOM_5]';echo '[RANDOM_5]';",
