@@ -1,0 +1,26 @@
+{
+    "description": "Open redirect",
+    "vuln_code": "REDIR",
+    "payloads": [
+        {
+            "payload": [
+                    "http://www.example.com",
+                    "https://www.example.com",
+                    "//www.example.com",
+                    "http://[tested.domain].www.example.com",
+                    "https://[tested.domain].www.example.com",
+                    "//[tested.domain].www.example.com",
+                    "http://www.example.com/[tested.domain]",
+                    "https://www.example.com/[tested.domain]",
+                    "//www.example.com/[tested.domain]",
+                    "http://[tested.domain]@www.example.com",
+                    "https://[tested.domain]@www.example.com",
+                    "//[tested.domain]@www.example.com"
+            ],
+            "verify": [
+                "REDIRECT"
+            ],
+            "type": "REDIRECT"
+        }
+    ]
+}

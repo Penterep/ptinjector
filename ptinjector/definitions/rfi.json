@@ -1,4 +1,23 @@
 {
     "description": "Remote File Inclusion",
-    "payloads": []
+    "payloads": [
+        {
+            "payload": [
+                    "example.com", "example.net", "example.org", "example.edu"
+                ],
+            "verify": [
+                ">Example Domain<", "(<!DOCTYPE .*>[\\S\\s]*){2}"
+            ],
+            "type": "REGEX"
+        },
+        {
+            "payload": [
+                    "bing.com", "google.com"
+                ],
+            "verify": [
+                "((r\\.bing\\.com.*)){2,}", "(<!DOCTYPE .*>[\\S\\s]*){2}"
+            ],
+            "type": "REGEX"
+        }
+    ]
 }

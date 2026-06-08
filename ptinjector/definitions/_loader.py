@@ -14,6 +14,7 @@ class DefinitionsLoader:
         self.technologies: set = set([technology.lower() for technology in args.technology if args.technology])
         self.folder_path: str = os.path.dirname(__file__)
         self.available_definition_files: list = self.get_definition_files(args.tests)
+        self.TESTED_URL = args.url
 
 
     def get_definition_files(self, tests: list):
@@ -177,7 +178,9 @@ class DefinitionsLoader:
 
             # REPLACE PLACEHOLDERS
             payload_object["verify"] = [re.sub(placeholders_re_pattern, replace_with_slice, text) for text in payload_object["verify"]]
+            payload_object["verify"] = [text.replace("[tested.domain]", self.TESTED_URL, -1) for text in payload_object["verify"]]
             payload_object["payload"] = [re.sub(placeholders_re_pattern, replace_with_slice, payload) for payload in payload_object["payload"]]
+            payload_object["payload"] = [payload.replace("[tested.domain]", self.TESTED_URL, -1) for payload in payload_object["payload"]]
 
 
         if invalid_payloads and json_data["payloads"]:

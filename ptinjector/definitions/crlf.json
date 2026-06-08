@@ -8,6 +8,53 @@
                 "foo"
             ],
             "type": "header"
+        },
+        {
+            "payload": [
+                "http://www.example.com%0ATH[RANDOM_4]:test",
+                "https://www.example.com%0ATH[RANDOM_4]:test",
+                "//www.example.com%0ATH[RANDOM_4]:test",
+                "http://[tested.domain].www.example.com%0ATH[RANDOM_4]:test",
+                "https://[tested.domain].www.example.com%0ATH[RANDOM_4]:test",
+                "//[tested.domain].www.example.com%0ATH[RANDOM_4]:test",
+                "http://www.example.com/[tested.domain]%0ATH[RANDOM_4]:test",
+                "https://www.example.com/[tested.domain]%0ATH[RANDOM_4]:test",
+                "//www.example.com/[tested.domain]%0ATH[RANDOM_4]:test",
+                "http://[tested.domain]@www.example.com%0ATH[RANDOM_4]:test",
+                "https://[tested.domain]@www.example.com%0ATH[RANDOM_4]:test",
+                "//[tested.domain]@www.example.com%0ATH[RANDOM_4]:test",
+                "http://www.example.com%250D%250ATH[RANDOM_4]:test",
+                "https://www.example.com%250D%250ATH[RANDOM_4]:test",
+                "//www.example.com%250D%250ATH[RANDOM_4]:test",
+                "http://[tested.domain].www.example.com%250D%250ATH[RANDOM_4]:test",
+                "https://[tested.domain].www.example.com%250D%250ATH[RANDOM_4]:test",
+                "//[tested.domain].www.example.com%250D%250ATH[RANDOM_4]:test",
+                "http://www.example.com/[tested.domain]%250D%250ATH[RANDOM_4]:test",
+                "https://www.example.com/[tested.domain]%250D%250ATH[RANDOM_4]:test",
+                "//www.example.com/[tested.domain]%250D%250ATH[RANDOM_4]:test",
+                "http://[tested.domain]@www.example.com%250D%250ATH[RANDOM_4]:test",
+                "https://[tested.domain]@www.example.com%250D%250ATH[RANDOM_4]:test",
+                "//[tested.domain]@www.example.com%250D%250ATH[RANDOM_4]:test",
+                "en%0ATH[RANDOM_4]:test",
+                "en%250D%250ATH[RANDOM_4]:test",
+                "http://www.example.com%0D%0ATH[RANDOM_4]:test",
+                "https://www.example.com%0D%0ATH[RANDOM_4]:test",
+                "//www.example.com%0D%0ATH[RANDOM_4]:test",
+                "http://[tested.domain].www.example.com%0D%0ATH[RANDOM_4]:test",
+                "https://[tested.domain].www.example.com%0D%0ATH[RANDOM_4]:test",
+                "//[tested.domain].www.example.com%0D%0ATH[RANDOM_4]:test",
+                "http://www.example.com/[tested.domain]%0D%0ATH[RANDOM_4]:test",
+                "https://www.example.com/[tested.domain]%0D%0ATH[RANDOM_4]:test",
+                "//www.example.com/[tested.domain]%0D%0ATH[RANDOM_4]:test",
+                "http://[tested.domain]@www.example.com%0D%0ATH[RANDOM_4]:test",
+                "https://[tested.domain]@www.example.com%0D%0ATH[RANDOM_4]:test",
+                "//[tested.domain]@www.example.com%0D%0ATH[RANDOM_4]:test",
+                "en%0D%0ATH[RANDOM_4]:test"
+            ],
+            "verify": [
+                "TH[RANDOM_4]"
+            ],
+            "type": "header"
         }
     ]
 }

