@@ -10,6 +10,7 @@ from ptlibs import ptprinthelper, ptmisclib, ptjsonlib, ptnethelper, ptcharsethe
 from ptlibs.parsers.http_request_parser import HttpRequestParser
 from urllib.parse import urlparse
 
+FOLDER_PATH: str = os.path.dirname(__file__)
 
 class DefinitionsLoader:
     def __init__(self, args, random_string):
@@ -17,7 +18,6 @@ class DefinitionsLoader:
         self.RANDOM_CODE: str = random_string
         self.verification_url: str = args.verification_url
         self.technologies: set = set([technology.lower() for technology in args.technology if args.technology])
-        self.folder_path: str = os.path.dirname(__file__)
         self.available_definition_files: list = self.get_definition_files(args.tests)
         if not args.request_file:
             self.TESTED_URL = args.url
@@ -31,7 +31,8 @@ class DefinitionsLoader:
             url, method, headers, request_data = parse = request_parser.parse_http_request(raw_request)
             self.TESTED_URL = urlparse(url).netloc
 
-    def get_definition_files(self, tests: list):
+    @staticmethod
+    def get_definition_files(tests: list):
 
         def is_payload_name(s: str, prefixes: List[str] = ['']) -> bool:
             result: bool = s[0] != '_' and s[0] != '.' and s[-5:] == '.json'
@@ -40,8 +41,8 @@ class DefinitionsLoader:
             return result
 
         filenames = sorted([
-                f for f in os.listdir(self.folder_path)
-                if is_payload_name(f, tests) and os.path.isfile(os.path.join(self.folder_path, f))
+                f for f in os.listdir(FOLDER_PATH)
+                if is_payload_name(f, tests) and os.path.isfile(os.path.join(FOLDER_PATH, f))
         ])
         return filenames
 
@@ -83,7 +84,7 @@ class DefinitionsLoader:
         skipped_tests: list = []
         for definition_filename in self.available_definition_files:
             definition_name: str = definition_filename .split(".json")[0]
-            definition_contents = self._read_definition_file(definition_filename)
+            definition_contents = DefinitionsLoader.read_definition_file(definition_filename)
             if not self.validate_json_structure_and_values(definition_contents, definition_filename):
                 skipped_tests.append(definition_filename)
                 continue
@@ -110,9 +111,10 @@ class DefinitionsLoader:
         """Returns True if <definition_filename> matches any of the <specified_tests>"""
         return True if [test for test in specified_tests if definition_filename.startswith(f'{test}_')] else False
 
-    def _read_definition_file(self, definition_filename: str, ) -> dict|None:
+    @staticmethod
+    def read_definition_file(definition_filename: str, ) -> dict|None:
         try:
-            file_path: str = os.path.join(self.folder_path, definition_filename )
+            file_path: str = os.path.join(FOLDER_PATH, definition_filename )
             with open(file_path, 'r') as file:
                 return json.load(file)
         except json.JSONDecodeError:
@@ -202,12 +204,13 @@ class DefinitionsLoader:
 
         return json_data
 
-    def get_definitions_help(self):
+    @staticmethod
+    def get_definitions_help():
         """Builds and returns help rows"""
         help_rows = []
-        for file_name in self.available_definition_files:
+        for file_name in DefinitionsLoader.get_definition_files([]):
             try:
-                row = ["", "", f' {file_name.rsplit(".json")[0].split()[0]}', f'  Test for {self._read_definition_file(file_name).get("description")}']
+                row = ["", "", f' {file_name.rsplit(".json")[0].split()[0]}', f'  Test for {DefinitionsLoader.read_definition_file(file_name).get("description")}']
             except:
                 row = ["", "", f' {file_name.rsplit(".json")[0].split()[0]}', f'  Test for {file_name.rsplit(".json")[0].split()[0]}']
             finally:
