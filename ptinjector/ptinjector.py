@@ -100,10 +100,6 @@ class PtInjector:
 
 
     def run_payload_str(self, request_data, payload_str):
-        if self.args.verbose:
-            ptprinthelper.ptprint(f"Sending payload: {payload_str}", "", condition=(not self.use_json), end=f"\n", colortext=False, clear_to_eol=True, indent=4)
-        else:
-            ptprinthelper.ptprint(f"Sending payload: {payload_str[:80] + '...' if len(payload_str) > 100 else payload_str}", "", condition=(not self.use_json), end=f"\r", colortext=False, clear_to_eol=True, indent=4)
         try:
             response, dump = self._send_payload(payload_str, request_data)
             return response, dump
@@ -174,6 +170,10 @@ class PtInjector:
 
     def _send_payload(self, payload: str, rdata=None) -> requests.models.Response:
         """Send <payload> to <url>"""
+        if self.args.verbose:
+            ptprinthelper.ptprint(f"Sending payload: {payload}", "", condition=(not self.use_json), end=f"\n", colortext=False, clear_to_eol=True, indent=4)
+        else:
+            ptprinthelper.ptprint(f"Sending payload: {payload[:80] + '...' if len(payload) > 100 else payload}", "", condition=(not self.use_json), end=f"\r",         colortext=False, clear_to_eol=True, indent=4)
 
         param, url, http_method, headers, data = rdata["parameter"], rdata["url"], rdata["method"], rdata["headers"], rdata["data"]
         timeout=None
