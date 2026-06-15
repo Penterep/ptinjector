@@ -227,7 +227,7 @@ class PtInjector:
                     # self.thread_statuses[thread_id].set()
                     try:
                         new_confirmed_payloads.extend(self.run_payload_object(payload_object, definition_contents, request_data, vulnerability_name))
-                    except TimeoutError:
+                    except requests.exceptions.Timeout:
                         if self.args.verbose:
                             sync_lock.acquire()
                             ptprinthelper.ptprint(
