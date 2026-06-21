@@ -390,7 +390,7 @@ class PtInjector:
             for symbol in "|/-\\|/":
                 ptprinthelper.ptprint(f"Scanning... {symbol}", condition=(not self.use_json), end=f"\r", colortext=False, clear_to_eol=False, indent=4)
                 time.sleep(0.01)
-        ptprinthelper.ptprint("", condition=(not self.use_json), end=f"\r", colortext=False, clear_to_eol=False, indent=4)
+        ptprinthelper.ptprint(" " * 13, condition=(not self.use_json), end=f"\r", colortext=False, clear_to_eol=False, indent=4)
         self.sync_lock.release()
 
 
