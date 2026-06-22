@@ -6,7 +6,7 @@ def run(payload_object, definition_contents, request_data, injector):
     payloads = []
     global last_payload_str
     for payload_str in payload_object["payload"]:
-        response, dump = injector._send_payload(payload_str, request_data)
+        response, dump = injector.run_payload_str(request_data, payload_str)
         last_payload_str = payload_str
         yield [payload_str], [response], dump
 

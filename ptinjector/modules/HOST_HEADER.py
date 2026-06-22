@@ -10,7 +10,7 @@ def run(payload_object, definition_contents, request_data, injector):
         request_data['headers']["X-Real-IP"] = payload_str
         request_data['headers']["X-Remote-IP"] = payload_str
         request_data['headers']["X-Remote-Addr"] = payload_str
-        response, dump = injector._send_payload(payload_str, request_data)
+        response, dump = injector.run_payload_str(request_data, payload_str)
         yield [payload_str], [response], dump
 
 

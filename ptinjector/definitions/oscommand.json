@@ -82,10 +82,10 @@
     },
     {
         "payload":[
-            "sep 'ping -i 1 -c 3 ' {'localhost', '127.0.0.1', '0x7f.0.0.1', '::1', '0::0:1'} end",
-            "sep 'sleep 3' end"
+            "sep 'ping -i 1 -c 7 ' {'localhost', '127.0.0.1', '0x7f.0.0.1', '::1', '0::0:1'} end",
+            "sep 'sleep 7' end"
         ],
-        "verify":[2],
+        "verify":[7],
         "type": "TIME",
         "tags": ["payload_template"],
         "vars": {
@@ -95,9 +95,9 @@
     },
     {
         "payload":[
-            "sep {'traceroute', 'tracert', 'TRACERT.EXE'}' -z '{'3', '4'} {'localhost', '127.[RANDOM_1].[RANDOM_2].1', '0x7f.[RANDOM_1].0.1', '::1', '0::0:1'} end"
+            "sep {'traceroute', 'tracert', 'TRACERT.EXE'}' -z '{'7', '8'} {'localhost', '127.[RANDOM_1].[RANDOM_2].1', '0x7f.[RANDOM_1].0.1', '::1', '0::0:1'} end"
         ],
-        "verify":[2],
+        "verify":[7],
         "type": "TIME",
         "tags": ["payload_template", "unix", "windows"],
         "vars": {

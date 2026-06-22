@@ -12,7 +12,7 @@ def run(payload_object, definition_contents, request_data, injector):
     responses = []
     payloads = []
     for payload_str in payload_object["payload"]:
-        response, dump = injector._send_payload(payload_str, request_data)
+        response, dump = injector.run_payload_str(request_data, payload_str)
         responses.append(response)
         payloads.append(payload_str)
     yield payloads, responses, dump
@@ -123,8 +123,10 @@ def equivalence_check(responses, verification_list):
 
     # if the contents_union has less than total_elements it means there were duplicates
     # in response_contents_filtered, so different SQL expressions returned the same contents
-    # which also were not default-returned, (since we removed false_contents
-    return len(contents_union) < total_elements
+    # which also were not default-returned, (since we removed false_contents and there is a check for
+    # nonempty contents_union in case the same content is returned.
+
+    return (len(contents_union) < total_elements) and len(contents_union) != 0
 
 
 def increasing_limit_check(responses, verification_list):
