@@ -106,7 +106,7 @@ class PtInjector:
         self.args                                                      = args
         self.modules                                               = self.load_modules(os.path.join(os.path.dirname(__file__), 'modules'))
         self.sync_lock = None
-        self.timeout = 10
+        self.timeout = 90
         self.number_requests = 0
         self.cumulative_seconds = 0
 
@@ -169,8 +169,11 @@ class PtInjector:
     def run_payload_object(self, payload_object, definition_contents, request_data, vulnerability_name):
         confirmed_payloads = list()
         mod = self.modules.get(payload_object["type"].upper(), DefaultVulnerability)
+        sent_payloads = []
         try:
             for payloads, responses, dump in mod.run(payload_object, definition_contents, request_data, injector=self):
+                if self.args.verbose:
+                    sent_payloads.extend(payloads)
                 if confirmed_payloads and not self.keep_testing:
                     break
                 if mod.check_if_vulnerable(responses, payload_object.get('verify', []), self):
@@ -179,24 +182,27 @@ class PtInjector:
         except requests.exceptions.RequestException as e:
             self.ptjsonlib.end_error(f"Error connecting to {self.args.url}:", details=e ,condition=self.use_json)
 
-        return confirmed_payloads
+        return confirmed_payloads, sent_payloads
 
 
-    def print_results(self, parameters, confirmed_payloads, sent_payloads, vulnerability_name, vulnerability_description, sync_lock: threading.Lock):
-        if not (parameters and confirmed_payloads):
-            return
+    def print_results(self, parameter, confirmed_payloads, sent_payloads, vulnerability_name, vulnerability_description, sync_lock: threading.Lock):
 
-        sync_lock.acquire()
+        # self.sync_lock.acquire()
+        # print(f"PRINT_RESULTS\n\n parameters={parameters}\nconfirmed_payloads={confirmed_payloads}, sent_payloads={sent_payloads}, vuln={vulnerability_name}")
+        # self.sync_lock.release()
+        # return
+
+        self.sync_lock.acquire()
+
         ptprinthelper.ptprint("Testing: " + f"{vulnerability_name.upper() if not vulnerability_description else vulnerability_description}", "TITLE", colortext=True, condition=(not self.use_json), newline_above=True)
 
         def print_results_for_parameter(parameter, confirmed: List[str], sent_list: List[str]):
             ptprinthelper.ptprint(f"Testing parameter: <{ptprinthelper.get_colored_text(parameter, 'TITLE')}>", "TITLE", not self.use_json, colortext=False, clear_to_eol=True, newline_above=False)
-            for payload_dict in sent_list:
-                for payload in payload_dict['payload']:
-                    if self.args.verbose and payload:
-                        ptprinthelper.ptprint(f"Sending payload: {payload}", "", condition=(not self.use_json), end=f"\n", colortext=False, clear_to_eol=True, indent=4)
-                    elif payload:
-                        ptprinthelper.ptprint(f"Sending payload: {payload[:80] + '...' if len(payload) > 100 else payload}", "", condition=(not self.use_json), end=f"\r",         colortext=False, clear_to_eol=True, indent=4)
+            for payload in sent_list:
+                if self.args.verbose and payload:
+                    ptprinthelper.ptprint(f"Sending payload: {payload}", "", condition=(not self.use_json), end=f"\n", colortext=False, clear_to_eol=True, indent=4)
+                elif payload:
+                    ptprinthelper.ptprint(f"Sending payload: {payload[:80] + '...' if len(payload) > 100 else payload}", "", condition=(not self.use_json), end=f"\r",        colortext=False, clear_to_eol=True, indent=4)
 
             if confirmed:
                 ptprinthelper.ptprint(f"Vulnerable to {vulnerability_description}", "VULN", condition=not self.use_json, colortext=True, clear_to_eol=True, indent=4)
@@ -206,13 +212,9 @@ class PtInjector:
             else:
                 ptprinthelper.ptprint(f"Not vulnerable to {vulnerability_description}", "OK", condition=not self.use_json, colortext=True, clear_to_eol=True, indent=4)
 
-        for i in range(len(parameters)):
-            parameter = parameters[i]
-            confirmed = confirmed_payloads[i]
-            sent = sent_payloads[i]
-            print_results_for_parameter(parameter, confirmed, sent)
+        print_results_for_parameter(parameter=parameter, confirmed=confirmed_payloads, sent_list=sent_payloads)
 
-        parameters.clear()
+        # parameters.clear()
         confirmed_payloads.clear()
         sent_payloads.clear()
 
@@ -237,13 +239,14 @@ class PtInjector:
             # TODO: ptprinthelper.ptprint(f"Testing connection to the target URL", "TITLE", colortext=True, condition=not self.use_json)
 
             vulnerability_description: str = definition_contents.get('description', vulnerability_name)
-            parameters = []
+            # parameters = []
             confirmed_payloads = []
             sent_payloads = []
 
             # Test parameter loop
+            parameter = None
             for request_data in self.generate_request_data(self.args):
-                parameters.append(request_data['parameter'])
+                parameter = request_data['parameter']
 
                 new_confirmed_payloads = []
                 new_sent_payloads = []
@@ -251,9 +254,10 @@ class PtInjector:
                     if should_end.is_set():
                         break
 
-                    # self.thread_statuses[thread_id].set()
                     try:
-                        new_confirmed_payloads.extend(self.run_payload_object(payload_object, definition_contents, request_data, vulnerability_name))
+                        new_confirmed_payloads, new_sent_payloads = self.run_payload_object(payload_object, definition_contents, request_data, vulnerability_name)
+                        confirmed_payloads.extend(new_confirmed_payloads)
+                        sent_payloads.extend(new_sent_payloads)
                     except requests.exceptions.Timeout:
                         if self.args.verbose:
                             sync_lock.acquire()
@@ -263,20 +267,14 @@ class PtInjector:
                             )
                             sync_lock.release()
                             break
-                    if self.args.verbose:
-                        new_sent_payloads.extend(definition_contents.get("payloads", []))
                     if new_confirmed_payloads and not self.keep_testing:
                         break
-                confirmed_payloads.append(new_confirmed_payloads)
-                sent_payloads.append(new_sent_payloads)
 
-            # self.thread_statuses[thread_id].set()
-
-            self.print_results(
-                parameters=parameters, confirmed_payloads=confirmed_payloads, sent_payloads=sent_payloads,
-                vulnerability_name=vulnerability_name, vulnerability_description=vulnerability_description,
-                sync_lock=sync_lock
-            )
+                self.print_results(
+                    parameter=parameter, confirmed_payloads=confirmed_payloads, sent_payloads=sent_payloads,
+                    vulnerability_name=vulnerability_name, vulnerability_description=vulnerability_description,
+                    sync_lock=sync_lock
+                )
 
         return
 
