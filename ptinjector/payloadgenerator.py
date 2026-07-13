@@ -240,8 +240,7 @@ def expand_template_object(p):
     template_string_generators = [make_payload_generator(t, p.get('vars', dict())) for t in p["payload"]]
     generated_payloads = list()
     while (generated_payloads := list(map(next, template_string_generators))) != []:
-        result['payload'] = generated_payloads
-        yield result
+        yield {**result, 'payload': generated_payloads}
     return
 
 

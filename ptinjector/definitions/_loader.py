@@ -94,7 +94,7 @@ class DefinitionsLoader:
 
             # Replace placeholders and add to loaded definitions
             definition_contents = self.process_payloads_and_replace_placeholders(definition_contents)
-            definition_contents['payloads'] = prepare_templates(definition_contents['payloads'])
+            definition_contents['payloads'] = list(prepare_templates(definition_contents['payloads']))
             loaded_definitions.update({definition_name : definition_contents})
 
 
