@@ -266,6 +266,11 @@ class CliIntegrationTest(unittest.TestCase):
             "Command injection",
         )
 
+    def test_cli_completes_command_injection_scan_against_safe_target(self):
+        output = self.run_cli("/safe?q=value", "q", "oscommand", timeout=30)
+
+        self.assertFalse(output["results"]["vulnerabilities"])
+
     def test_cli_does_not_reuse_stale_ssrf_callback(self):
         from ptinjector.server.app import MyAPI
         from werkzeug.serving import make_server

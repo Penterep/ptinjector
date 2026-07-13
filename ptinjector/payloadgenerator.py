@@ -6,6 +6,7 @@ from random import randint
 from typing import List
 from enum import Enum
 import json
+from itertools import zip_longest
 from urllib import parse
 
 
@@ -233,10 +234,36 @@ def expand_template_object(p):
         yield p
         return
 
-    result = {key: value for key, value in p.items() if key not in {"payload", "vars"}}
-    template_string_generators = [make_payload_generator(t, p.get('vars', dict())) for t in p["payload"]]
-    generated_payloads = list()
-    while (generated_payloads := list(map(next, template_string_generators))) != []:
+    result = {
+        key: value
+        for key, value in p.items()
+        if key not in {"payload", "vars", "max_variants"}
+    }
+    max_variants = p.get("max_variants")
+    generated_variants = [
+        list(make_payload_generator(template, p.get('vars', dict())))
+        for template in p["payload"]
+    ]
+
+    if max_variants is not None:
+        if not isinstance(max_variants, int) or max_variants <= 0:
+            raise ValueError("max_variants must be a positive integer")
+
+        def evenly_spaced(variants):
+            if len(variants) <= max_variants:
+                return variants
+            if max_variants == 1:
+                return variants[:1]
+            return [
+                variants[index * (len(variants) - 1) // (max_variants - 1)]
+                for index in range(max_variants)
+            ]
+
+        generated_variants = [evenly_spaced(variants) for variants in generated_variants]
+
+    missing = object()
+    for payload_group in zip_longest(*generated_variants, fillvalue=missing):
+        generated_payloads = [payload for payload in payload_group if payload is not missing]
         yield {**result, 'payload': generated_payloads}
     return
 

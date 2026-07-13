@@ -639,6 +639,42 @@ class PayloadGeneratorTest(unittest.TestCase):
 
         self.assertEqual(payload["verification_urls"], template["verification_urls"])
 
+    def test_template_expansion_evenly_limits_large_variant_sets(self):
+        template = {
+            "payload": ["value", "'prefix-' value"],
+            "verify": ["marker"],
+            "type": "REGEX",
+            "tags": ["payload_template"],
+            "max_variants": 3,
+            "vars": {"value": [str(value) for value in range(100)]},
+        }
+
+        payloads = list(payloadgenerator.prepare_templates([template]))
+
+        self.assertEqual(
+            [payload["payload"] for payload in payloads],
+            [["0", "prefix-0"], ["49", "prefix-49"], ["99", "prefix-99"]],
+        )
+        self.assertTrue(all("max_variants" not in payload for payload in payloads))
+
+    def test_command_injection_templates_have_a_bounded_scan_size(self):
+        import json
+        from pathlib import Path
+
+        definition_path = (
+            Path(__file__).parents[1]
+            / "ptinjector"
+            / "definitions"
+            / "oscommand.json"
+        )
+        definition = json.loads(definition_path.read_text())
+
+        payloads = list(payloadgenerator.prepare_templates(definition["payloads"]))
+
+        self.assertLessEqual(len(payloads), 200)
+        self.assertLessEqual(sum(len(payload["payload"]) for payload in payloads), 350)
+        self.assertEqual({payload["type"] for payload in payloads}, {"REGEX", "TIME"})
+
 
 if __name__ == "__main__":
     unittest.main()
