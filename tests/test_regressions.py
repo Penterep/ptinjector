@@ -34,11 +34,12 @@ class RecordingInjector:
 
 
 class TimeVerifierTest(unittest.TestCase):
-    def test_run_sends_baseline_before_payloads(self):
+    def test_run_uses_a_fresh_control_before_each_negative_payload(self):
         injector = RecordingInjector([
             make_response(seconds=0.1),
-            make_response(seconds=7.1),
-            make_response(seconds=7.2),
+            make_response(seconds=0.2),
+            make_response(seconds=0.1),
+            make_response(seconds=0.2),
         ])
 
         results = list(TIME.run(
@@ -48,22 +49,82 @@ class TimeVerifierTest(unittest.TestCase):
             injector,
         ))
 
-        self.assertEqual(injector.payloads, [injector.RANDOM_STRING, "sleep-a", "sleep-b"])
+        self.assertEqual(injector.payloads, [
+            f"{injector.RANDOM_STRING}-control-0-1",
+            "sleep-a",
+            f"{injector.RANDOM_STRING}-control-1-1",
+            "sleep-b",
+        ])
         self.assertEqual(len(results), 2)
         self.assertTrue(all(len(responses) == 2 for _, responses, _ in results))
 
-    def test_expected_delay_over_baseline_is_vulnerable(self):
-        responses = [make_response(seconds=3.0), make_response(seconds=8.7)]
+    def test_run_confirms_a_suspected_delay_with_a_second_pair(self):
+        injector = RecordingInjector([
+            make_response(seconds=0.1),
+            make_response(seconds=5.8),
+            make_response(seconds=0.2),
+            make_response(seconds=5.9),
+        ])
+
+        results = list(TIME.run(
+            {"payload": ["sleep-a"], "verify": [7]},
+            {},
+            {"parameter": "id"},
+            injector,
+        ))
+
+        self.assertEqual(len(results[0][1]), 4)
+        self.assertEqual(injector.payloads[-1], "sleep-a")
+
+    def test_repeated_expected_delay_is_vulnerable(self):
+        responses = [
+            make_response(seconds=3.0),
+            make_response(seconds=8.7),
+            make_response(seconds=4.0),
+            make_response(seconds=9.8),
+        ]
         self.assertTrue(TIME.check_if_vulnerable(responses, [7], None))
 
     def test_slow_baseline_does_not_cause_false_positive(self):
-        responses = [make_response(seconds=5.0), make_response(seconds=7.1)]
+        responses = [
+            make_response(seconds=5.0),
+            make_response(seconds=7.1),
+            make_response(seconds=4.0),
+            make_response(seconds=9.8),
+        ]
+        self.assertFalse(TIME.check_if_vulnerable(responses, [7], None))
+
+    def test_one_off_latency_spike_is_rejected(self):
+        responses = [
+            make_response(seconds=0.1),
+            make_response(seconds=6.0),
+            make_response(seconds=0.1),
+            make_response(seconds=0.2),
+        ]
+        self.assertFalse(TIME.check_if_vulnerable(responses, [7], None))
+
+    def test_changed_status_code_is_rejected(self):
+        responses = [
+            make_response(seconds=0.1),
+            make_response(seconds=6.0, status_code=500),
+            make_response(seconds=0.1),
+            make_response(seconds=6.0, status_code=500),
+        ]
+        self.assertFalse(TIME.check_if_vulnerable(responses, [7], None))
+
+    def test_repeated_slow_server_errors_are_rejected(self):
+        responses = [
+            make_response(seconds=0.1, status_code=500),
+            make_response(seconds=6.0, status_code=500),
+            make_response(seconds=0.1, status_code=500),
+            make_response(seconds=6.0, status_code=500),
+        ]
         self.assertFalse(TIME.check_if_vulnerable(responses, [7], None))
 
     def test_invalid_verification_value_is_rejected(self):
-        responses = [make_response(seconds=0.1), make_response(seconds=7.1)]
-        self.assertFalse(TIME.check_if_vulnerable(responses, [0], None))
+        responses = [make_response(seconds=0.1) for _ in range(4)]
         with redirect_stdout(io.StringIO()):
+            self.assertFalse(TIME.check_if_vulnerable(responses, [0], None))
             self.assertFalse(TIME.check_if_vulnerable(responses, ["invalid"], None))
 
 
