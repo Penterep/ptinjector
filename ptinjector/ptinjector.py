@@ -27,7 +27,7 @@ import socket
 import time
 import tempfile
 import urllib
-from typing import Tuple, List, Dict
+from typing import Tuple, List
 import importlib
 import requests
 from bs4 import BeautifulSoup
@@ -36,8 +36,6 @@ from ptlibs.parsers.http_request_parser import HttpRequestParser
 
 from _version import __version__
 from definitions._loader import DefinitionsLoader
-from itertools import islice
-import threading
 import datetime
 
 def headers_cookies_prepare(args):
@@ -59,35 +57,6 @@ def headers_cookies_prepare(args):
     return headers_dict
 
 
-def prepare_thread_args(definitions: Dict, number_of_groups: int) -> List[Dict]:
-
-    def split_dictionary(d: dict, n: int) -> List[dict]:
-        if n <= 0:
-            return [d]
-        if n >= len(d):
-            n = len(d)
-
-        items = list(d.items())
-        items_len = len(items)
-        slice_size, remainder = items_len // n, items_len % n
-        result = []
-        start = 0
-
-        for i in range(n):
-            end  = start + slice_size + (1 if 1 < remainder else 0)
-            slice_dict = dict(items[start:end])
-            result.append(slice_dict)
-            start = end
-
-        return result
-
-    result = split_dictionary(definitions, number_of_groups)
-    while dict() in result:
-        result.remove(dict())
-
-    return result
-
-
 class PtInjector:
     def __init__(self, args):
         self.ptjsonlib: object                              = ptjsonlib.PtJsonLib()
@@ -105,7 +74,6 @@ class PtInjector:
         self.request_parser: object                         = HttpRequestParser(ptjsonlib=self.ptjsonlib, use_json=self.use_json, placeholder=self.PLACEHOLDER_SYMBOL)
         self.args                                                      = args
         self.modules                                               = self.load_modules(os.path.join(os.path.dirname(__file__), 'modules'))
-        self.sync_lock = None
         self.timeout = 90
         self.number_requests = 0
         self.cumulative_seconds = 0
@@ -185,15 +153,7 @@ class PtInjector:
         return confirmed_payloads, sent_payloads
 
 
-    def print_results(self, parameter, confirmed_payloads, sent_payloads, vulnerability_name, vulnerability_description, sync_lock: threading.Lock):
-
-        # self.sync_lock.acquire()
-        # print(f"PRINT_RESULTS\n\n parameters={parameters}\nconfirmed_payloads={confirmed_payloads}, sent_payloads={sent_payloads}, vuln={vulnerability_name}")
-        # self.sync_lock.release()
-        # return
-
-        self.sync_lock.acquire()
-
+    def print_results(self, parameter, confirmed_payloads, sent_payloads, vulnerability_name, vulnerability_description):
         ptprinthelper.ptprint("Testing: " + f"{vulnerability_name.upper() if not vulnerability_description else vulnerability_description}", "TITLE", colortext=True, condition=(not self.use_json), newline_above=True)
 
         def print_results_for_parameter(parameter, confirmed: List[str], sent_list: List[str]):
@@ -214,176 +174,55 @@ class PtInjector:
 
         print_results_for_parameter(parameter=parameter, confirmed=confirmed_payloads, sent_list=sent_payloads)
 
-        # parameters.clear()
         confirmed_payloads.clear()
         sent_payloads.clear()
 
-        sync_lock.release()
+    def run(self, args):
+        """Main method"""
 
-    def run_thread(self, thread_arg: Dict, sync_lock: threading.Lock, should_end: threading.Event, thread_id: int):
-
-        for vulnerability_name, definition_contents in thread_arg.items():
-            if should_end.is_set():
-                break
-
-            # self.thread_statuses[thread_id].set()
-
+        for vulnerability_name, definition_contents in self.LOADED_DEFINITIONS.items():
             if not definition_contents.get("payloads", False):
-                sync_lock.acquire()
+                vulnerability_description = definition_contents.get('description', vulnerability_name)
                 ptprinthelper.ptprint(f"No payloads available to test for {vulnerability_description} vulnerability" + bool(self.args.technology) * f" with chosen technology: {", ".join(self.args.technology)}", "WARNING", condition=not self.use_json, colortext=False, clear_to_eol=True)
-                sync_lock.release()
                 continue
 
-            self.is_valid_request(self.args)
-            # TODO: Test stability of server
-            # TODO: ptprinthelper.ptprint(f"Testing connection to the target URL", "TITLE", colortext=True, condition=not self.use_json)
-
+            self.is_valid_request(args)
             vulnerability_description: str = definition_contents.get('description', vulnerability_name)
-            # parameters = []
-            confirmed_payloads = []
-            sent_payloads = []
 
-            # Test parameter loop
-            parameter = None
-            for request_data in self.generate_request_data(self.args):
+            for request_data in self.generate_request_data(args):
                 parameter = request_data['parameter']
+                confirmed_payloads = []
+                sent_payloads = []
 
-                new_confirmed_payloads = []
-                new_sent_payloads = []
                 for payload_object in definition_contents.get("payloads", []):
-                    if should_end.is_set():
-                        break
-
                     try:
                         new_confirmed_payloads, new_sent_payloads = self.run_payload_object(payload_object, definition_contents, request_data, vulnerability_name)
                         confirmed_payloads.extend(new_confirmed_payloads)
                         sent_payloads.extend(new_sent_payloads)
                     except requests.exceptions.Timeout:
                         if self.args.verbose:
-                            sync_lock.acquire()
                             ptprinthelper.ptprint(
                                 f"Timeout out for {vulnerability_description} vulnerability",
                                 "INFO", condition=not self.use_json, colortext=False, clear_to_eol=True
                             )
-                            sync_lock.release()
-                            break
+                        break
+
                     if new_confirmed_payloads and not self.keep_testing:
                         break
 
                 self.print_results(
-                    parameter=parameter, confirmed_payloads=confirmed_payloads, sent_payloads=sent_payloads,
-                    vulnerability_name=vulnerability_name, vulnerability_description=vulnerability_description,
-                    sync_lock=sync_lock
+                    parameter=parameter,
+                    confirmed_payloads=confirmed_payloads,
+                    sent_payloads=sent_payloads,
+                    vulnerability_name=vulnerability_name,
+                    vulnerability_description=vulnerability_description,
                 )
 
-        return
 
-
-    def start_threads(self, callee_to_run, thread_args, sync_lock, should_end):
-
-        threads = []
-
-        #self.thread_statuses = [threading.Event() for _ in len(thread_args)]
-        #for status in self.thread_statuses:
-        #    status.clear()
-        should_end.clear()
-        self.sync_lock = sync_lock
-
-        # def run_thread(self, thread_arg: Dict, sync_lock: threading.Lock, should_end: threading.Event, thread_id: int):
-        for thread_id, thread_arg in enumerate(thread_args):
-            t = threading.Thread(
-                target=self.run_thread,
-                kwargs={
-                    "thread_arg": thread_arg,
-                    "sync_lock": sync_lock,
-                    "should_end": should_end,
-                    "thread_id": thread_id
-                }
-            )
-            t.start()
-            threads.append(t)
-
-        return threads
-
-
-    def finish_threads(self, threads, should_end, thread_timeout, work_check_limit, sync_lock: threading.Lock):
-        working_threads = len(threads)
-        not_working_status_counters = [0 for _ in range(len(threads))]
-        while any(t.is_alive() for t in threads):
-
-            for thread_id, thread in enumerate(threads):
-                #if t.is_alive():
-                #    if not self.thread_statuses[thread_id].is_set():
-                #        not_working_status_counters[thread_id] += 1
-                #    else:
-                #        not_working_status_counters[thread_id] = 0
-                #if not_working_status_counters[thread_id] > work_check_limit:
-                #    should_end.set()
-
-                if not thread.is_alive():
-                    thread.join(timeout=thread_timeout)
-                time.sleep(0.1)
-
-
-        for thread in threads:
-            thread.join(timeout=thread_timeout)
-
-        return
-
-
-    def run(self, args):
-        """Main method"""
-
-        # ptprinthelper.ptprint(f"Target URL: {args.url}", "TITLE", colortext=True, condition=not self.use_json)
-
-        number_of_threads = min(os.cpu_count(), len(self.LOADED_DEFINITIONS))
-        # print(f"Number of threads = {number_of_threads}, number of definitions = {len(self.LOADED_DEFINITIONS)}")
-        thread_args = prepare_thread_args(self.LOADED_DEFINITIONS, number_of_threads)
-        #
-        # print(f"number of thread args = {len(thread_args)}")
-        # print("number per arg")
-        # for e in thread_args:
-        #     print(len(e))
-
-        # quit()
-        sync_lock = threading.Lock()
-        should_end = threading.Event()
-        should_end.clear()
-        thread_timeout = 10
-
-        # print("Starting threads")
-        threads = self.start_threads(
-            callee_to_run=self.run_thread,
-            thread_args=thread_args,
-            sync_lock=sync_lock,
-            should_end=should_end
-        )
-
-        self.finish_threads(
-            threads=threads,
-            should_end=should_end,
-            thread_timeout=thread_timeout,
-            sync_lock=sync_lock,
-            work_check_limit=10
-        )
-
-        
         ptprinthelper.ptprint("Finished", "TITLE", condition=not self.use_json, clear_to_eol=True, newline_above=True)
         if self.use_json:
             self.ptjsonlib.set_status("finished")
             print(self.ptjsonlib.get_result_json())
-
-    def signal_progress(self):
-        if random.randint(0, 30) != 0:
-            return
-        self.sync_lock.acquire()
-        for _ in range(5):
-            for symbol in "|/-\\|/":
-                ptprinthelper.ptprint(f"Scanning... {symbol}", condition=(not self.use_json), end=f"\r", colortext=False, clear_to_eol=False, indent=4)
-                time.sleep(0.01)
-        ptprinthelper.ptprint(" " * 13, condition=(not self.use_json), end=f"\r", colortext=False, clear_to_eol=False, indent=4)
-        self.sync_lock.release()
-
 
     def _send_payload(self, payload: str, rdata=None) -> requests.models.Response:
         """Send <payload> to <url>"""
@@ -391,8 +230,6 @@ class PtInjector:
         #    ptprinthelper.ptprint(f"Sending payload: {payload}", "", condition=(not self.use_json), end=f"\n", colortext=False, clear_to_eol=True, indent=4)
         #else:
         #    ptprinthelper.ptprint(f"Sending payload: {payload[:80] + '...' if len(payload) > 100 else payload}", "", condition=(not self.use_json), end=f"\r",         colortext=False, clear_to_eol=True, indent=4)
-        self.signal_progress()
-
         param, url, http_method, headers, data = rdata["parameter"], rdata["url"], rdata["method"], rdata["headers"], rdata["data"]
 
         URL_PLACEHOLDER_INDEX = self.get_placeholder_from_url(url)
