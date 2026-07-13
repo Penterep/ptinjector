@@ -37,6 +37,8 @@ from ptlibs.parsers.http_request_parser import HttpRequestParser
 from _version import __version__
 from definitions._loader import DefinitionsLoader
 
+MAX_CONSECUTIVE_REQUEST_ERRORS = 3
+
 def headers_cookies_prepare(args):
     headers_dict = dict()
     if args.cookie:
@@ -77,6 +79,9 @@ class PtInjector:
         self.PLACEHOLDER_SYMBOL: str                        = args.placeholder
         self.RANDOM_STRING: str                             = ''.join([random.choice(ptcharsethelper.get_charset(["numbers"])) for i in range(10)])
         self.local_server_process                          = None
+        self.scan_errors                                   = []
+        self.consecutive_request_errors                    = 0
+        self.abort_scan                                    = False
         self.VERIFICATION_URL, self.BASE64_VERIFICATION_URL = self.setup_verification_url(args)
         self.PLACEHOLDER_EXISTS: bool                       = True if args.request_file else self.check_if_placeholder_exists()
         self.URL_PLACEHOLDER_INDEX: int                     = -1
@@ -111,32 +116,50 @@ class PtInjector:
 
 
     def run_payload_str(self, request_data, payload_str):
-        try:
-            return self._send_payload(payload_str, request_data)
-        except requests.exceptions.RequestException as e:
-            self.ptjsonlib.end_error(f"Error connecting to {self.args.url}:", details=e ,condition=self.use_json)
+        result = self._send_payload(payload_str, request_data)
+        self.consecutive_request_errors = 0
+        return result
+
+    def record_request_error(self, error, context, count_toward_abort=True):
+        """Record a recoverable request failure without misreporting a negative result."""
+        error_record = {
+            "context": context,
+            "type": type(error).__name__,
+            "message": str(error),
+        }
+        self.scan_errors.append(error_record)
+
+        if count_toward_abort:
+            self.consecutive_request_errors += 1
+            if self.consecutive_request_errors >= MAX_CONSECUTIVE_REQUEST_ERRORS:
+                self.abort_scan = True
+
+        ptprinthelper.ptprint(
+            f"Request failed during {context}: {error}",
+            "WARNING",
+            condition=not self.use_json,
+            colortext=False,
+            clear_to_eol=True,
+        )
 
 
     def run_payload_object(self, payload_object, definition_contents, request_data, vulnerability_name):
         confirmed_payloads = list()
         mod = self.modules.get(payload_object["type"].upper(), DefaultVulnerability)
         sent_payloads = []
-        try:
-            for payloads, responses, dump in mod.run(payload_object, definition_contents, request_data, injector=self):
-                if self.args.verbose:
-                    sent_payloads.extend(payloads)
-                if confirmed_payloads and not self.keep_testing:
-                    break
-                if mod.check_if_vulnerable(responses, payload_object.get('verify', []), self):
-                    confirmed_payloads.extend(payloads)
-                    self.ptjsonlib.add_vulnerability(definition_contents.get("vulnerability"), vuln_request=dump["request"], vuln_response=dump["response"])
-        except requests.exceptions.RequestException as e:
-            self.ptjsonlib.end_error(f"Error connecting to {self.args.url}:", details=e ,condition=self.use_json)
+        for payloads, responses, dump in mod.run(payload_object, definition_contents, request_data, injector=self):
+            if self.args.verbose:
+                sent_payloads.extend(payloads)
+            if confirmed_payloads and not self.keep_testing:
+                break
+            if mod.check_if_vulnerable(responses, payload_object.get('verify', []), self):
+                confirmed_payloads.extend(payloads)
+                self.ptjsonlib.add_vulnerability(definition_contents.get("vulnerability"), vuln_request=dump["request"], vuln_response=dump["response"])
 
         return confirmed_payloads, sent_payloads
 
 
-    def print_results(self, parameter, confirmed_payloads, sent_payloads, vulnerability_name, vulnerability_description):
+    def print_results(self, parameter, confirmed_payloads, sent_payloads, vulnerability_name, vulnerability_description, incomplete=False):
         ptprinthelper.ptprint("Testing: " + f"{vulnerability_name.upper() if not vulnerability_description else vulnerability_description}", "TITLE", colortext=True, condition=(not self.use_json), newline_above=True)
 
         def print_results_for_parameter(parameter, confirmed: List[str], sent_list: List[str]):
@@ -152,6 +175,8 @@ class PtInjector:
                 ptprinthelper.ptprint(f"Executed payloads:", "TITLE", condition=not self.use_json, colortext=True, clear_to_eol=True, indent=4)
                 for c in confirmed:
                     ptprinthelper.ptprint(c, "TEXT", condition=not self.use_json, colortext=False, indent=8)
+            elif incomplete:
+                ptprinthelper.ptprint(f"Inconclusive test for {vulnerability_description} due to request errors", "WARNING", condition=not self.use_json, colortext=False, clear_to_eol=True, indent=4)
             else:
                 ptprinthelper.ptprint(f"Not vulnerable to {vulnerability_description}", "OK", condition=not self.use_json, colortext=True, clear_to_eol=True, indent=4)
 
@@ -176,19 +201,25 @@ class PtInjector:
                 parameter = request_data['parameter']
                 confirmed_payloads = []
                 sent_payloads = []
+                parameter_incomplete = False
 
                 for payload_object in definition_contents.get("payloads", []):
+                    errors_before_payload = len(self.scan_errors)
                     try:
                         new_confirmed_payloads, new_sent_payloads = self.run_payload_object(payload_object, definition_contents, request_data, vulnerability_name)
                         confirmed_payloads.extend(new_confirmed_payloads)
                         sent_payloads.extend(new_sent_payloads)
-                    except requests.exceptions.Timeout:
-                        if self.args.verbose:
-                            ptprinthelper.ptprint(
-                                f"Timeout out for {vulnerability_description} vulnerability",
-                                "INFO", condition=not self.use_json, colortext=False, clear_to_eol=True
-                            )
-                        break
+                        if len(self.scan_errors) > errors_before_payload:
+                            parameter_incomplete = True
+                    except requests.exceptions.RequestException as error:
+                        parameter_incomplete = True
+                        self.record_request_error(
+                            error,
+                            context=f"{vulnerability_description} on parameter {parameter}",
+                        )
+                        if self.abort_scan:
+                            break
+                        continue
 
                     if new_confirmed_payloads and not self.keep_testing:
                         break
@@ -199,13 +230,27 @@ class PtInjector:
                     sent_payloads=sent_payloads,
                     vulnerability_name=vulnerability_name,
                     vulnerability_description=vulnerability_description,
+                    incomplete=parameter_incomplete,
                 )
 
+                if self.abort_scan:
+                    break
 
-        ptprinthelper.ptprint("Finished", "TITLE", condition=not self.use_json, clear_to_eol=True, newline_above=True)
+            if self.abort_scan:
+                break
+
+
+        completion_message = ""
+        if self.scan_errors:
+            completion_message = f"Scan completed with {len(self.scan_errors)} request error(s); results are incomplete."
+            self.ptjsonlib.add_properties({"incomplete": True, "requestErrors": self.scan_errors})
+
+        ptprinthelper.ptprint(completion_message or "Finished", "TITLE", condition=not self.use_json, clear_to_eol=True, newline_above=True)
         if self.use_json:
-            self.ptjsonlib.set_status("finished")
+            self.ptjsonlib.set_status("finished", completion_message)
             print(self.ptjsonlib.get_result_json())
+
+        return not self.scan_errors
 
     def _send_payload(self, payload: str, rdata=None) -> requests.models.Response:
         """Send <payload> to <url>"""
@@ -566,14 +611,15 @@ def main():
     script = None
     try:
         script = PtInjector(args)
-        script.run(args)
+        completed = script.run(args)
+        return 0 if completed else 2
     finally:
         if script is not None:
             script.stop_local_server()
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
 
 
 

@@ -1,4 +1,5 @@
 import json
+import socket
 import sqlite3
 import subprocess
 import sys
@@ -29,6 +30,10 @@ class VulnerableTargetHandler(BaseHTTPRequestHandler):
                 with urlopen(value, timeout=2) as callback_response:
                     callback_response.read()
             body = "<html><body>request processed</body></html>"
+        elif parsed_url.path == "/disconnect":
+            self.connection.shutdown(socket.SHUT_RDWR)
+            self.connection.close()
+            return
         else:
             value = parameters.get("q", [""])[0]
             body = f"<html><body>{value}</body></html>"
@@ -65,7 +70,7 @@ class VulnerableTargetHandler(BaseHTTPRequestHandler):
 
 
 class CliIntegrationTest(unittest.TestCase):
-    def run_cli(self, path, parameter, test_name, timeout=30, extra_args=None):
+    def run_cli(self, path, parameter, test_name, timeout=30, extra_args=None, expected_returncode=0):
         server = HTTPServer(("127.0.0.1", 0), VulnerableTargetHandler)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
@@ -97,7 +102,7 @@ class CliIntegrationTest(unittest.TestCase):
             thread.join(timeout=5)
             server.server_close()
 
-        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.returncode, expected_returncode, result.stderr)
         output = json.loads(result.stdout)
         self.assertEqual(output["status"], "finished")
         return output
@@ -152,6 +157,19 @@ class CliIntegrationTest(unittest.TestCase):
         vulnerabilities = output["results"]["vulnerabilities"]
         self.assertEqual(len(vulnerabilities), 1)
         self.assertEqual(vulnerabilities[0]["vulnCode"], "SSRF")
+
+    def test_cli_marks_network_failure_as_incomplete(self):
+        output = self.run_cli(
+            "/disconnect?q=value",
+            "q",
+            "xss",
+            expected_returncode=2,
+        )
+
+        self.assertEqual(output["status"], "finished")
+        self.assertIn("results are incomplete", output["message"])
+        self.assertTrue(output["results"]["properties"]["incomplete"])
+        self.assertTrue(output["results"]["properties"]["requestErrors"])
 
 
 if __name__ == "__main__":

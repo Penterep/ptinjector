@@ -37,7 +37,14 @@ def run(payload_object, definition_contents, request_data, injector):
                     verify=False,
                     timeout=min(injector.timeout, 5),
                 )
-            except requests.exceptions.RequestException:
+            except requests.exceptions.RequestException as error:
+                record_error = getattr(injector, "record_request_error", None)
+                if record_error:
+                    record_error(
+                        error,
+                        context=f"callback verification at {verification_url}",
+                        count_toward_abort=False,
+                    )
                 break
 
             verification_responses.append(verification_response)

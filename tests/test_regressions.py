@@ -396,6 +396,7 @@ class RequestVerifierTest(unittest.TestCase):
     @patch("ptinjector.modules.REQUEST.requests.get")
     def test_unreachable_verifier_does_not_crash_scan(self, get):
         get.side_effect = REQUEST.requests.exceptions.ConnectionError("offline")
+        record_request_error = MagicMock()
         injector = SimpleNamespace(
             VERIFICATION_URL="https://callback.example/verify/code",
             proxy={"http": None, "https": None},
@@ -404,6 +405,7 @@ class RequestVerifierTest(unittest.TestCase):
                 make_response(),
                 {"request": payload, "response": ""},
             ),
+            record_request_error=record_request_error,
         )
 
         results = list(REQUEST.run(
@@ -415,6 +417,7 @@ class RequestVerifierTest(unittest.TestCase):
 
         self.assertEqual(results[0][1], [])
         self.assertFalse(REQUEST.check_if_vulnerable(results[0][1], [], injector))
+        record_request_error.assert_called_once()
 
     def test_ssrf_payloads_receive_unique_verification_urls(self):
         from ptinjector.definitions._loader import DefinitionsLoader
@@ -542,6 +545,66 @@ class RequestPreparationTest(unittest.TestCase):
         self.assertEqual(args.verification_url, "https://callback.example")
         self.assertEqual(args.timeout, 15)
         self.assertEqual(args.headers, [["Authorization: Bearer abc:def"]])
+
+
+class ErrorHandlingTest(unittest.TestCase):
+    def make_injector(self):
+        from ptinjector.ptinjector import PtInjector
+        from ptlibs import ptjsonlib
+
+        injector = object.__new__(PtInjector)
+        injector.use_json = True
+        injector.ptjsonlib = ptjsonlib.PtJsonLib()
+        injector.scan_errors = []
+        injector.consecutive_request_errors = 0
+        injector.abort_scan = False
+        return injector
+
+    def test_three_consecutive_request_errors_trigger_circuit_breaker(self):
+        injector = self.make_injector()
+
+        for attempt in range(3):
+            injector.record_request_error(
+                REQUEST.requests.exceptions.ConnectionError(f"offline-{attempt}"),
+                context="test target",
+            )
+
+        self.assertTrue(injector.abort_scan)
+        self.assertEqual(len(injector.scan_errors), 3)
+
+    def test_scan_continues_after_recoverable_payload_error_and_marks_result_incomplete(self):
+        injector = self.make_injector()
+        injector.LOADED_DEFINITIONS = {
+            "test": {
+                "description": "Test vulnerability",
+                "payloads": [{"type": "REGEX"}, {"type": "REGEX"}],
+            }
+        }
+        injector.is_valid_request = MagicMock()
+        injector.generate_request_data = MagicMock(return_value=[{"parameter": "id"}])
+        injector.run_payload_object = MagicMock(side_effect=[
+            REQUEST.requests.exceptions.ConnectionError("temporary failure"),
+            ([], []),
+        ])
+        injector.print_results = MagicMock()
+        args = SimpleNamespace(technology=set())
+
+        with redirect_stdout(io.StringIO()):
+            completed = injector.run(args)
+
+        self.assertFalse(completed)
+        self.assertEqual(injector.run_payload_object.call_count, 2)
+        injector.print_results.assert_called_once_with(
+            parameter="id",
+            confirmed_payloads=[],
+            sent_payloads=[],
+            vulnerability_name="test",
+            vulnerability_description="Test vulnerability",
+            incomplete=True,
+        )
+        properties = injector.ptjsonlib.json_object["results"]["properties"]
+        self.assertTrue(properties["incomplete"])
+        self.assertEqual(len(properties["requestErrors"]), 1)
 
 
 class PayloadGeneratorTest(unittest.TestCase):
