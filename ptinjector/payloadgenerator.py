@@ -233,10 +233,7 @@ def expand_template_object(p):
         yield p
         return
 
-    result = dict()
-    result["verify"] = p["verify"]
-    result["tags"] = p.get("tags", set())
-    result["type"] = p.get("type", "REGEX")
+    result = {key: value for key, value in p.items() if key not in {"payload", "vars"}}
     template_string_generators = [make_payload_generator(t, p.get('vars', dict())) for t in p["payload"]]
     generated_payloads = list()
     while (generated_payloads := list(map(next, template_string_generators))) != []:

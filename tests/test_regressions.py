@@ -2,10 +2,11 @@ import datetime
 import io
 import os
 import sys
+import tempfile
 import unittest
 from contextlib import redirect_stdout
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from ptinjector import payloadgenerator
 from ptinjector.modules import BOOLEAN, HEADER, HOST_HEADER, HTML_ATTR, HTML_TAG, REDIRECT, REGEX, REQUEST, TIME
@@ -345,19 +346,101 @@ class RequestVerifierTest(unittest.TestCase):
         )
 
         results = list(REQUEST.run(
-            {"payload": ["callback-payload"]},
+            {
+                "payload": ["callback-payload"],
+                "verification_urls": ["https://callback.example/verify/unique-code"],
+            },
             {},
             {"parameter": "url"},
             injector,
         ))
 
         get.assert_called_once_with(
-            injector.VERIFICATION_URL,
+            "https://callback.example/verify/unique-code",
             proxies=injector.proxy,
             verify=False,
-            timeout=injector.timeout,
+            timeout=5,
         )
         self.assertIs(results[0][1][0], verification_response)
+
+    @patch("ptinjector.modules.REQUEST.time.sleep")
+    @patch("ptinjector.modules.REQUEST.requests.get")
+    def test_run_polls_until_delayed_callback_arrives(self, get, sleep):
+        missing = SimpleNamespace(status_code=200, json=lambda: {"msg": "false"})
+        confirmed = SimpleNamespace(status_code=200, json=lambda: {"msg": "true"})
+        get.side_effect = [missing, missing, confirmed]
+        injector = SimpleNamespace(
+            VERIFICATION_URL="https://callback.example/verify/fallback",
+            proxy={"http": None, "https": None},
+            timeout=90,
+            run_payload_str=lambda request_data, payload: (
+                make_response(),
+                {"request": payload, "response": ""},
+            ),
+        )
+
+        results = list(REQUEST.run(
+            {
+                "payload": ["callback-payload"],
+                "verification_urls": ["https://callback.example/verify/unique-code"],
+            },
+            {},
+            {"parameter": "url"},
+            injector,
+        ))
+
+        self.assertEqual(get.call_count, 3)
+        self.assertEqual(sleep.call_count, 2)
+        self.assertTrue(REQUEST.check_if_vulnerable(results[0][1], [], injector))
+
+    @patch("ptinjector.modules.REQUEST.requests.get")
+    def test_unreachable_verifier_does_not_crash_scan(self, get):
+        get.side_effect = REQUEST.requests.exceptions.ConnectionError("offline")
+        injector = SimpleNamespace(
+            VERIFICATION_URL="https://callback.example/verify/code",
+            proxy={"http": None, "https": None},
+            timeout=90,
+            run_payload_str=lambda request_data, payload: (
+                make_response(),
+                {"request": payload, "response": ""},
+            ),
+        )
+
+        results = list(REQUEST.run(
+            {"payload": ["callback-payload"]},
+            {},
+            {"parameter": "url"},
+            injector,
+        ))
+
+        self.assertEqual(results[0][1], [])
+        self.assertFalse(REQUEST.check_if_vulnerable(results[0][1], [], injector))
+
+    def test_ssrf_payloads_receive_unique_verification_urls(self):
+        from ptinjector.definitions._loader import DefinitionsLoader
+
+        args = SimpleNamespace(
+            json=True,
+            verification_url="https://callback.example",
+            technology=set(),
+            tests=["ssrf"],
+            request_file=None,
+            url="https://target.example/?url=value",
+        )
+        payload_objects = DefinitionsLoader(args, "1234567890").load_definitions()["ssrf"]["payloads"]
+        callback_pairs = [
+            (payload, verification_url)
+            for payload_object in payload_objects
+            for payload, verification_url in zip(
+                payload_object["payload"], payload_object["verification_urls"]
+            )
+        ]
+
+        self.assertEqual(len(callback_pairs), 2)
+        self.assertEqual(len({url for _, url in callback_pairs}), 2)
+        for payload, verification_url in callback_pairs:
+            callback_code = verification_url.rsplit("/", 1)[1]
+            self.assertIn(f"/save/{callback_code}", payload)
 
     def test_local_server_base_url_is_exposed_to_definition_loader(self):
         from ptinjector.ptinjector import PtInjector
@@ -372,6 +455,54 @@ class RequestVerifierTest(unittest.TestCase):
 
         self.assertEqual(args.verification_url, "http://127.0.0.1:5000")
         self.assertEqual(verification_url, "http://127.0.0.1:5000/verify/1234567890")
+
+
+class CallbackServerTest(unittest.TestCase):
+    def test_callback_code_can_only_be_verified_once(self):
+        from ptinjector.server.app import MyAPI
+
+        with tempfile.TemporaryDirectory() as config_path:
+            api = MyAPI(None, 0, config_path=config_path, start_scheduler=False)
+            client = api.app.test_client()
+
+            self.assertEqual(client.get("/save/unique-code").status_code, 200)
+            self.assertEqual(client.get("/verify/unique-code").get_json(), {"msg": "true"})
+            self.assertEqual(client.get("/verify/unique-code").get_json(), {"msg": "false"})
+
+    @patch("ptinjector.ptinjector.atexit.register")
+    @patch("ptinjector.ptinjector.socket.create_connection")
+    @patch("ptinjector.ptinjector.subprocess.Popen")
+    def test_local_server_is_stopped_after_successful_start(self, popen, create_connection, register):
+        from ptinjector.ptinjector import PtInjector
+
+        process = popen.return_value
+        process.poll.return_value = None
+        create_connection.return_value = MagicMock()
+        injector = object.__new__(PtInjector)
+        injector.local_server_process = None
+
+        self.assertIs(injector.start_local_server("127.0.0.1", "5000"), process)
+        injector.stop_local_server()
+
+        register.assert_called_once()
+        process.terminate.assert_called_once()
+        process.wait.assert_called_once_with(timeout=3)
+        self.assertIsNone(injector.local_server_process)
+
+    @patch("ptinjector.ptinjector.time.monotonic", side_effect=[0, 6])
+    @patch("ptinjector.ptinjector.subprocess.Popen")
+    def test_local_server_startup_has_a_deadline(self, popen, monotonic):
+        from ptinjector.ptinjector import PtInjector
+
+        process = popen.return_value
+        injector = object.__new__(PtInjector)
+        injector.local_server_process = None
+
+        with self.assertRaisesRegex(RuntimeError, "did not start"):
+            injector.start_local_server("127.0.0.1", "5000")
+
+        process.terminate.assert_called_once()
+        process.wait.assert_called_once_with(timeout=3)
 
 
 class RequestPreparationTest(unittest.TestCase):
@@ -430,6 +561,20 @@ class PayloadGeneratorTest(unittest.TestCase):
         self.assertEqual(first_pass, [["first"], ["second"]])
         self.assertEqual(second_pass, first_pass)
         self.assertEqual(len({id(payload) for payload in payloads}), len(payloads))
+
+    def test_template_expansion_preserves_callback_metadata(self):
+        template = {
+            "payload": ["value"],
+            "verify": ["marker"],
+            "verification_urls": ["https://callback.example/verify/code"],
+            "type": "REQUEST",
+            "tags": ["payload_template"],
+            "vars": {"value": ["first"]},
+        }
+
+        payload = next(payloadgenerator.prepare_templates([template]))
+
+        self.assertEqual(payload["verification_urls"], template["verification_urls"])
 
 
 if __name__ == "__main__":

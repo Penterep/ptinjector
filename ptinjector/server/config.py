@@ -29,6 +29,16 @@ class Config:
         json_data_list.append(data)
         self._write_to_json(json_data_list)
 
+    def consume_code(self, code: str) -> bool:
+        """Remove and confirm a callback code exactly once."""
+        json_data_list = self._read_json()
+        remaining = [item for item in json_data_list if item.get("code") != code]
+        if len(remaining) == len(json_data_list):
+            return False
+
+        self._write_to_json(remaining)
+        return True
+
     def _write_to_json(self, content: list):
         """Write <content> to json file"""
         with open(self.json_file_path, "w") as file:
@@ -42,7 +52,7 @@ class Config:
                 data = json.load(file)
                 return data
         except (FileNotFoundError, json.JSONDecodeError):
-            print(f"Soubor {file} nebyl nalezen, vytvářím nový.")
+            return []
 
 
     def get_json_file_path(self):

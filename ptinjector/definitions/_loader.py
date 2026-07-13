@@ -89,6 +89,9 @@ class DefinitionsLoader:
                 skipped_tests.append(definition_filename)
                 continue
 
+            if "vulnerability" not in definition_contents and definition_contents.get("vuln_code"):
+                definition_contents["vulnerability"] = definition_contents["vuln_code"]
+
             if self.technologies:
                 definition_contents['payloads'] = take_by_tags(definition_contents['payloads'], self.technologies)
 
@@ -148,11 +151,12 @@ class DefinitionsLoader:
 
     def process_payloads_and_replace_placeholders (self, json_data: dict):
         """Replaces found placeholders inside definition files. Also converts any int to str."""
-        def replace_with_slice(match):
+        def replace_placeholder(match, callback_code=None):
             # Extract the number from the match
             if match.group().upper() == "[URL]":
                 if self.verification_url:
-                    return self.verification_url + f"/save/{self.RANDOM_CODE}"
+                    code = callback_code or self.RANDOM_CODE
+                    return self.verification_url + f"/save/{code}"
                 else:
                     return "[URL]"
             else:
@@ -193,10 +197,29 @@ class DefinitionsLoader:
                 continue
 
             # REPLACE PLACEHOLDERS
-            payload_object["verify"] = [re.sub(placeholders_re_pattern, replace_with_slice, text) for text in payload_object["verify"]]
+            payload_object["verify"] = [re.sub(placeholders_re_pattern, replace_placeholder, text) for text in payload_object["verify"]]
             payload_object["verify"] = [text.replace("[tested.domain]", self.TESTED_URL, -1) for text in payload_object["verify"]]
-            payload_object["payload"] = [re.sub(placeholders_re_pattern, replace_with_slice, payload) for payload in payload_object["payload"]]
-            payload_object["payload"] = [payload.replace("[tested.domain]", self.TESTED_URL, -1) for payload in payload_object["payload"]]
+
+            processed_payloads = []
+            verification_urls = []
+            is_request_payload = payload_object["type"].casefold() == "request"
+            for payload_string_index, payload in enumerate(payload_object["payload"]):
+                callback_code = (
+                    f"{self.RANDOM_CODE}-{payload_index}-{payload_string_index}"
+                    if is_request_payload else None
+                )
+                payload = re.sub(
+                    placeholders_re_pattern,
+                    lambda match: replace_placeholder(match, callback_code),
+                    payload,
+                )
+                processed_payloads.append(payload.replace("[tested.domain]", self.TESTED_URL, -1))
+                if callback_code:
+                    verification_urls.append(f"{self.verification_url}/verify/{callback_code}")
+
+            payload_object["payload"] = processed_payloads
+            if verification_urls:
+                payload_object["verification_urls"] = verification_urls
 
 
         if invalid_payloads and json_data["payloads"]:

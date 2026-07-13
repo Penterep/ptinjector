@@ -17,6 +17,7 @@
 """
 
 import argparse
+import atexit
 import base64
 import random
 import re
@@ -25,7 +26,6 @@ import sys; sys.path.append(__file__.rsplit("/", 1)[0])
 import subprocess
 import socket
 import time
-import tempfile
 import urllib
 from typing import Tuple, List
 import importlib
@@ -76,6 +76,7 @@ class PtInjector:
         self.keep_testing                                   = args.keep_testing
         self.PLACEHOLDER_SYMBOL: str                        = args.placeholder
         self.RANDOM_STRING: str                             = ''.join([random.choice(ptcharsethelper.get_charset(["numbers"])) for i in range(10)])
+        self.local_server_process                          = None
         self.VERIFICATION_URL, self.BASE64_VERIFICATION_URL = self.setup_verification_url(args)
         self.PLACEHOLDER_EXISTS: bool                       = True if args.request_file else self.check_if_placeholder_exists()
         self.URL_PLACEHOLDER_INDEX: int                     = -1
@@ -288,21 +289,51 @@ class PtInjector:
             self.ptjsonlib.end_error(f"Unable to get IP address while starting local server. ({e})", self.use_json)
 
     def start_local_server(self, host, port):
-        """Starts local server on specified <port>"""
-        # Remove the signal file if it exists
-        if os.path.exists(os.path.join(tempfile.gettempdir(), "flask_ready.txt")):
-            os.remove(os.path.join(tempfile.gettempdir(), "flask_ready.txt"))
-
-        # Start the Flask app using subprocess
+        """Start the callback server and wait until its TCP port is reachable."""
         path_to_app = os.path.join(__file__.rsplit("/", 1)[0], "server", "app.py")
-        flask_process = subprocess.Popen([sys.executable, path_to_app, '--host', host, '--port', port], stdout=subprocess.DEVNULL)#, stderr=subprocess.DEVNULL)#, stderr=subprocess)
+        flask_process = subprocess.Popen(
+            [sys.executable, path_to_app, '--host', host, '--port', port],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        deadline = time.monotonic() + 5
 
-        # TODO: Catch errors, such as port already in use. etc.
-
-        # Wait for the signal file to be created
-        while not os.path.exists(os.path.join(tempfile.gettempdir(), "flask_ready.txt")):
+        while time.monotonic() < deadline:
+            if flask_process.poll() is not None:
+                raise RuntimeError("Local verification server exited during startup")
+            try:
+                with socket.create_connection((host, int(port)), timeout=0.2):
+                    self.local_server_process = flask_process
+                    atexit.register(self.stop_local_server)
+                    return flask_process
+            except OSError:
+                pass
             time.sleep(0.1)
-        return flask_process
+
+        flask_process.terminate()
+        try:
+            flask_process.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            flask_process.kill()
+            flask_process.wait(timeout=3)
+        raise RuntimeError(f"Local verification server did not start on {host}:{port}")
+
+    def stop_local_server(self):
+        """Stop the callback server subprocess owned by this scanner."""
+        process = getattr(self, "local_server_process", None)
+        if process is None:
+            return
+
+        self.local_server_process = None
+        if process.poll() is not None:
+            return
+
+        process.terminate()
+        try:
+            process.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=3)
 
     def setup_verification_url(self, args):
         if args.start_local_server:
@@ -532,10 +563,13 @@ def main():
         sys.exit(0)
 
     args = parse_args()
-    script = PtInjector(args)
-
-
-    script.run(args)
+    script = None
+    try:
+        script = PtInjector(args)
+        script.run(args)
+    finally:
+        if script is not None:
+            script.stop_local_server()
 
 
 if __name__ == "__main__":

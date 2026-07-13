@@ -2,11 +2,13 @@ import json
 import sqlite3
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import unittest
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlsplit
+from urllib.request import urlopen
 
 
 class VulnerableTargetHandler(BaseHTTPRequestHandler):
@@ -21,6 +23,12 @@ class VulnerableTargetHandler(BaseHTTPRequestHandler):
             if "sleep(7)" in value.casefold():
                 time.sleep(5.8)
             body = f"<html><body>{value}</body></html>"
+        elif parsed_url.path == "/ssrf":
+            value = parameters.get("url", [""])[0]
+            if value.startswith(("http://", "https://")):
+                with urlopen(value, timeout=2) as callback_response:
+                    callback_response.read()
+            body = "<html><body>request processed</body></html>"
         else:
             value = parameters.get("q", [""])[0]
             body = f"<html><body>{value}</body></html>"
@@ -57,26 +65,28 @@ class VulnerableTargetHandler(BaseHTTPRequestHandler):
 
 
 class CliIntegrationTest(unittest.TestCase):
-    def run_cli(self, path, parameter, test_name, timeout=30):
+    def run_cli(self, path, parameter, test_name, timeout=30, extra_args=None):
         server = HTTPServer(("127.0.0.1", 0), VulnerableTargetHandler)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
 
         try:
             url = f"http://127.0.0.1:{server.server_port}{path}"
+            command = [
+                sys.executable,
+                "-m",
+                "ptinjector.ptinjector",
+                "-u",
+                url,
+                "-P",
+                parameter,
+                "-ts",
+                test_name,
+            ]
+            command.extend(extra_args or [])
+            command.append("-j")
             result = subprocess.run(
-                [
-                    sys.executable,
-                    "-m",
-                    "ptinjector.ptinjector",
-                    "-u",
-                    url,
-                    "-P",
-                    parameter,
-                    "-ts",
-                    test_name,
-                    "-j",
-                ],
+                command,
                 capture_output=True,
                 text=True,
                 timeout=timeout,
@@ -115,6 +125,33 @@ class CliIntegrationTest(unittest.TestCase):
     def test_cli_confirms_time_sqli_twice(self):
         output = self.run_cli("/time?id=1", "id", "sqli_time", timeout=30)
         self.assert_sqli_found(output)
+
+    def test_cli_does_not_reuse_stale_ssrf_callback(self):
+        from ptinjector.server.app import MyAPI
+        from werkzeug.serving import make_server
+
+        with tempfile.TemporaryDirectory() as config_path:
+            callback_api = MyAPI(None, 0, config_path=config_path, start_scheduler=False)
+            callback_server = make_server("127.0.0.1", 0, callback_api.app)
+            callback_thread = threading.Thread(target=callback_server.serve_forever, daemon=True)
+            callback_thread.start()
+            try:
+                callback_base_url = f"http://127.0.0.1:{callback_server.server_port}"
+                output = self.run_cli(
+                    "/ssrf?url=value",
+                    "url",
+                    "ssrf",
+                    timeout=30,
+                    extra_args=["--verify-url", callback_base_url, "--keep-testing"],
+                )
+            finally:
+                callback_server.shutdown()
+                callback_thread.join(timeout=5)
+                callback_server.server_close()
+
+        vulnerabilities = output["results"]["vulnerabilities"]
+        self.assertEqual(len(vulnerabilities), 1)
+        self.assertEqual(vulnerabilities[0]["vulnCode"], "SSRF")
 
 
 if __name__ == "__main__":
