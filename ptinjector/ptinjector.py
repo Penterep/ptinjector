@@ -40,8 +40,10 @@ from definitions._loader import DefinitionsLoader
 def headers_cookies_prepare(args):
     headers_dict = dict()
     if args.cookie:
-        args.cookie = "Cookie: " + ";".join([c for cookies in args.cookie for c in cookies])
-        headers_dict["Cookie"] = args.cookie
+        headers_dict["Cookie"] = ";".join(cookie for cookie_group in args.cookie for cookie in cookie_group)
+
+    if args.user_agent:
+        headers_dict["User-Agent"] = args.user_agent
 
     if args.data:
         headers_dict["Content-Type"] = "application/x-www-form-urlencoded"
@@ -51,9 +53,17 @@ def headers_cookies_prepare(args):
 
     for header_lst in args.headers:
         for header in header_lst:
-            header_name, header_value = map(str.strip, header.split(":"))
+            header_name, header_value = map(str.strip, header.split(":", 1))
             headers_dict[header_name] = header_value
     return headers_dict
+
+
+def header_pair(value):
+    """Validate a header while allowing colons in its value."""
+    header_name, separator, _ = value.partition(":")
+    if not separator or not header_name.strip():
+        raise argparse.ArgumentTypeError("Header must use the 'Name: Value' format")
+    return value
 
 
 class PtInjector:
@@ -73,7 +83,7 @@ class PtInjector:
         self.request_parser: object                         = HttpRequestParser(ptjsonlib=self.ptjsonlib, use_json=self.use_json, placeholder=self.PLACEHOLDER_SYMBOL)
         self.args                                                      = args
         self.modules                                               = self.load_modules(os.path.join(os.path.dirname(__file__), 'modules'))
-        self.timeout = 90
+        self.timeout = args.timeout
 
     def load_modules(self, path: str):
         "loads from path, modules for testing different vulnerabilities, each should implement run() and check_if_vulnerable(), otherwise the defaults are used"
@@ -299,11 +309,17 @@ class PtInjector:
             local_ip = self.get_local_ip()
             port = args.start_local_server
             self.start_local_server(host=local_ip, port=port)
-            verification_url = f"http://{local_ip}:{port}/verify/{self.RANDOM_STRING}"
+            verification_base_url = f"http://{local_ip}:{port}"
         elif args.verification_url:
-            verification_url = f"{args.verification_url}/verify/{self.RANDOM_STRING}"
+            verification_base_url = args.verification_url.rstrip("/")
         else:
-            verification_url = None
+            verification_base_url = None
+
+        args.verification_url = verification_base_url
+        verification_url = (
+            f"{verification_base_url}/verify/{self.RANDOM_STRING}"
+            if verification_base_url else None
+        )
 
         base64_verification_url = (
             base64.b64encode(bytes(f'<img src="{verification_url}">', "ascii"))
@@ -433,20 +449,21 @@ def get_help():
         ]},
         {"options": [
             ["-u",  "--url",                   "<url>",           "Test URL"],
-            ["-ts", "--test",      "<test>",                      "Specify one or more tests to perform:"],
+            ["-ts", "--tests",     "<test>",                      "Specify one or more tests to perform:"],
             *DefinitionsLoader.get_definitions_help(),
             ["",    "",                       "",                 ""],
-            ["-rf", "--request_file",         "<request-file>",   "Set request-file.txt"],
+            ["-rf", "--request-file",         "<request-file>",   "Set request-file.txt"],
             ["-d",  "--data",                 "<data>",           "Set request-data"],
             ["-P",  "--parameter",            "<parameter>",      "Set parameter to test (e.g. GET, POST parameters)"],
             ["-H",  "--headers",              "<headers>",        "Set Header(s)"],
             ["-c",  "--cookie",               "<cookie>",         "Set Cookie(s)"],
-            ["-a",  "--agent",                "<agent>",          "Set User-Agent"],
+            ["-a",  "--user-agent",           "<agent>",          "Set User-Agent"],
             ["-p",  "--proxy",                "<proxy>",          "Set Proxy"],
             ["-vu", "--verify-url",           "<verify-url>",     "Set Verification URL (used with e.g. SSRF)"],
             ["-g",  "--technology",            "<technology>",    "Set Technology"],
             ["-k",  "--keep-testing",         "",                 "Keep sending payloads after a vulnerability is found"],
             ["-l",  "--start-local-server",   "<port>",           "Start local server on <port> (default 5000)"],
+            ["-T",  "--timeout",              "<seconds>",        "Set request timeout (default 90)"],
             ["-vv", "--verbose",              "",                 "Print detailed output"],
             ["-v",  "--version",              "",                 "Show script version and exit"],
             ["-h",  "--help",                 "",                 "Show this help message and exit"],
@@ -462,14 +479,18 @@ def parse_args() -> argparse.Namespace:
     exclusive.add_argument("-rf", "--request-file",     type=str)
     parser.add_argument("-ts",  "--tests",               type=str,  nargs="+")
     parser.add_argument("-g",  "--technology",          type=str,  nargs="+", default=set())
-    parser.add_argument("-a",  "--user_agent",          type=str)
-    parser.add_argument("-vu", "--verification_url",    type=str)
+    parser.add_argument("-a",  "--user-agent", "--agent", "--user_agent", dest="user_agent", type=str)
+    parser.add_argument(
+        "-vu", "--verify-url", "--verification-url", "--verification_url",
+        dest="verification_url", type=str,
+    )
     parser.add_argument("-p",  "--proxy",               type=str)
     parser.add_argument("-c",  "--cookie",              type=str, nargs="+", action="append")
     parser.add_argument("-P",  "--parameter",           type=str)
     parser.add_argument("-d",  "--data",                type=str)
     parser.add_argument("-l",  "--start-local-server",  type=str, nargs="?", const="5000")
-    parser.add_argument("-H",  "--headers",             type=ptmisclib.pairs, nargs="+", action="append")
+    parser.add_argument("-H",  "--headers",             type=header_pair, nargs="+", action="append")
+    parser.add_argument("-T",  "--timeout",             type=int, default=90)
     parser.add_argument("-vv",  "--verbose",            action="store_true")
     parser.add_argument("-k",  "--keep-testing",        action="store_true")
     parser.add_argument("-j",  "--json",                action="store_true")
@@ -477,7 +498,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--placeholder",                type=str, default="<INJECT_HERE>")
 
     args = parser.parse_args()
-    args.request_file = os.path.abspath(os.path.join(os.path.dirname(__file__), args.request_file)) if args.request_file else None
+    if args.timeout <= 0:
+        parser.error("--timeout must be greater than zero")
+    args.request_file = os.path.abspath(os.path.expanduser(args.request_file)) if args.request_file else None
     ptprinthelper.print_banner(SCRIPTNAME, __version__, args.json, space=0)
     return args
 

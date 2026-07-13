@@ -1,26 +1,23 @@
 
 
 def run(payload_object, definition_contents, request_data, injector):
-    responses = []
-    payloads = []
+    baseline_response, _ = injector.run_payload_str(request_data, injector.RANDOM_STRING)
+
     for payload_str in payload_object["payload"]:
-        request_data['headers']['Host'] = payload_str
-        request_data['headers']["X-Forwarded-Host"] = payload_str
-        request_data['headers']["X-Client-IP"] = payload_str
-        request_data['headers']["X-Real-IP"] = payload_str
-        request_data['headers']["X-Remote-IP"] = payload_str
-        request_data['headers']["X-Remote-Addr"] = payload_str
-        response, dump = injector.run_payload_str(request_data, payload_str)
-        yield [payload_str], [response], dump
+        payload_request_data = {**request_data, "headers": dict(request_data.get("headers", {}))}
+        for header in ("Host", "X-Forwarded-Host", "X-Client-IP", "X-Real-IP", "X-Remote-IP", "X-Remote-Addr"):
+            payload_request_data["headers"][header] = payload_str
+
+        response, dump = injector.run_payload_str(payload_request_data, payload_str)
+        yield [payload_str], [baseline_response, response, payload_str], dump
 
 
 def check_if_vulnerable(responses, verification_list, injector):
-    response = responses[0]
-    result =  False
+    """Return True when the injected host is newly reflected in an HTML response."""
+    if len(responses) != 3:
+        return False
 
-    if response.headers['Content-Type'] == 'text/html':
-        for verification_string in verification_list:
-            result |= verification_string in response.text
+    baseline_response, payload_response, payload = responses
+    content_type = payload_response.headers.get("Content-Type", "").split(";", 1)[0].strip().casefold()
 
-    return result
-
+    return content_type == "text/html" and payload in payload_response.text and payload not in baseline_response.text

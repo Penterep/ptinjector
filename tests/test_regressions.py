@@ -1,18 +1,23 @@
 import datetime
 import io
+import os
+import sys
 import unittest
 from contextlib import redirect_stdout
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from ptinjector import payloadgenerator
-from ptinjector.modules import HEADER, REGEX, TIME
+from ptinjector.modules import BOOLEAN, HEADER, HOST_HEADER, HTML_ATTR, HTML_TAG, REDIRECT, REGEX, REQUEST, TIME
 
 
-def make_response(*, seconds=0, text="", headers=None):
+def make_response(*, seconds=0, text="", content=None, headers=None, status_code=200):
     return SimpleNamespace(
         elapsed=datetime.timedelta(seconds=seconds),
         text=text,
+        content=text.encode() if content is None else content,
         headers=headers or {},
+        status_code=status_code,
     )
 
 
@@ -94,6 +99,257 @@ class HeaderVerifierTest(unittest.TestCase):
     def test_partial_header_name_match_is_rejected(self):
         responses = [make_response(headers={}), make_response(headers={"X-Foo-Bar": "value"})]
         self.assertFalse(HEADER.check_if_vulnerable(responses, ["foo"], None))
+
+
+class HostHeaderVerifierTest(unittest.TestCase):
+    def test_new_host_reflection_is_vulnerable(self):
+        responses = [
+            make_response(text="normal"),
+            make_response(
+                text="generated link: example.com",
+                headers={"Content-Type": "text/html; charset=utf-8"},
+            ),
+            "example.com",
+        ]
+        self.assertTrue(HOST_HEADER.check_if_vulnerable(responses, [], None))
+
+    def test_host_present_in_baseline_is_rejected(self):
+        responses = [
+            make_response(text="default example.com"),
+            make_response(text="default example.com", headers={"Content-Type": "text/html"}),
+            "example.com",
+        ]
+        self.assertFalse(HOST_HEADER.check_if_vulnerable(responses, [], None))
+
+    def test_run_does_not_mutate_original_headers(self):
+        calls = []
+        request_data = {"parameter": "id", "headers": {"Original": "value"}}
+
+        class Injector:
+            RANDOM_STRING = "1234567890"
+
+            def run_payload_str(self, current_request_data, payload):
+                calls.append((payload, dict(current_request_data["headers"])))
+                return make_response(text=payload, headers={"Content-Type": "text/html"}), {
+                    "request": payload,
+                    "response": "",
+                }
+
+        list(HOST_HEADER.run({"payload": ["example.com"]}, {}, request_data, Injector()))
+
+        self.assertEqual(request_data["headers"], {"Original": "value"})
+        self.assertEqual(calls[0], ("1234567890", {"Original": "value"}))
+        self.assertEqual(calls[1][1]["Host"], "example.com")
+
+
+class HtmlTagVerifierTest(unittest.TestCase):
+    def test_new_expected_tag_is_vulnerable(self):
+        responses = [
+            make_response(text="<html><body>normal</body></html>"),
+            make_response(text="<html><body><foo>injected</foo></body></html>"),
+        ]
+        self.assertTrue(HTML_TAG.check_if_vulnerable(responses, ["foo"], None))
+
+    def test_tag_present_in_baseline_without_new_instance_is_rejected(self):
+        responses = [
+            make_response(text="<foo>existing</foo>"),
+            make_response(text="<foo>existing</foo>"),
+        ]
+        self.assertFalse(HTML_TAG.check_if_vulnerable(responses, ["foo"], None))
+
+    def test_additional_expected_tag_is_vulnerable(self):
+        responses = [
+            make_response(text="<foo>existing</foo>"),
+            make_response(text="<foo>existing</foo><foo>injected</foo>"),
+        ]
+        self.assertTrue(HTML_TAG.check_if_vulnerable(responses, ["foo"], None))
+
+
+class HtmlAttributeVerifierTest(unittest.TestCase):
+    def test_new_expected_attribute_is_vulnerable(self):
+        responses = [
+            make_response(text="<div>normal</div>"),
+            make_response(text="<div foo='injected'>payload</div>"),
+        ]
+        self.assertTrue(HTML_ATTR.check_if_vulnerable(responses, ["foo"], None))
+
+    def test_attribute_present_in_baseline_without_new_instance_is_rejected(self):
+        responses = [
+            make_response(text="<div foo='existing'></div>"),
+            make_response(text="<div foo='changed'></div>"),
+        ]
+        self.assertFalse(HTML_ATTR.check_if_vulnerable(responses, ["foo"], None))
+
+
+class RedirectVerifierTest(unittest.TestCase):
+    def test_new_exact_redirect_is_vulnerable(self):
+        payload = "https://www.example.com"
+        responses = [
+            make_response(status_code=200),
+            make_response(status_code=302, headers={"Location": payload}),
+            payload,
+        ]
+        self.assertTrue(REDIRECT.check_if_vulnerable(responses, ["REDIRECT"], None))
+
+    def test_non_redirect_response_is_rejected(self):
+        payload = "https://www.example.com"
+        responses = [
+            make_response(status_code=200),
+            make_response(status_code=200, headers={"Location": payload}),
+            payload,
+        ]
+        self.assertFalse(REDIRECT.check_if_vulnerable(responses, ["REDIRECT"], None))
+
+    def test_different_redirect_target_is_rejected(self):
+        responses = [
+            make_response(status_code=200),
+            make_response(status_code=302, headers={"Location": "https://safe.example"}),
+            "https://www.example.com",
+        ]
+        self.assertFalse(REDIRECT.check_if_vulnerable(responses, ["REDIRECT"], None))
+
+
+class BooleanVerifierTest(unittest.TestCase):
+    def test_json_content_type_with_charset_is_parsed(self):
+        response = make_response(
+            text='{"result": "five"}',
+            headers={"Content-Type": "application/json; charset=utf-8"},
+        )
+        self.assertEqual(BOOLEAN.tagset(response), {"result: five"})
+
+    def test_missing_or_malformed_content_type_falls_back_to_raw_content(self):
+        missing_header = make_response(content=b"raw response")
+        malformed_json = make_response(
+            text="not-json",
+            content=b"not-json",
+            headers={"Content-Type": "application/json"},
+        )
+        self.assertEqual(BOOLEAN.tagset(missing_header), {b"raw response"})
+        self.assertEqual(BOOLEAN.tagset(malformed_json), {b"not-json"})
+
+    def test_equivalent_expression_responses_are_detected(self):
+        responses = [
+            make_response(content=b"false"),
+            make_response(content=b"one"),
+            make_response(content=b"unique"),
+            make_response(content=b"same"),
+            make_response(content=b"same"),
+        ]
+        self.assertTrue(BOOLEAN.equivalence_check(responses, []))
+
+    def test_distinct_expression_responses_are_rejected(self):
+        responses = [
+            make_response(content=b"false"),
+            make_response(content=b"one"),
+            make_response(content=b"three"),
+            make_response(content=b"four"),
+            make_response(content=b"five"),
+        ]
+        self.assertFalse(BOOLEAN.equivalence_check(responses, []))
+
+    def test_increasing_limit_requires_successful_responses(self):
+        responses = [
+            make_response(text="one", status_code=200),
+            make_response(text="one\ntwo", status_code=500),
+        ]
+        self.assertFalse(BOOLEAN.increasing_limit_check(responses, []))
+
+
+class RequestVerifierTest(unittest.TestCase):
+    def test_confirmed_callback_is_vulnerable(self):
+        response = SimpleNamespace(status_code=200, json=lambda: {"msg": "true"})
+        self.assertTrue(REQUEST.check_if_vulnerable([response], [], None))
+
+    def test_missing_or_invalid_callback_is_rejected(self):
+        missing = SimpleNamespace(status_code=200, json=lambda: {"msg": "false"})
+        invalid = SimpleNamespace(status_code=200, json=lambda: {"invalid": True})
+        error = SimpleNamespace(status_code=503, json=lambda: {"msg": "true"})
+        self.assertFalse(REQUEST.check_if_vulnerable([missing], [], None))
+        self.assertFalse(REQUEST.check_if_vulnerable([invalid], [], None))
+        self.assertFalse(REQUEST.check_if_vulnerable([error], [], None))
+
+    @patch("ptinjector.modules.REQUEST.requests.get")
+    def test_run_queries_verification_url_after_target_payload(self, get):
+        verification_response = SimpleNamespace(status_code=200, json=lambda: {"msg": "true"})
+        get.return_value = verification_response
+
+        injector = SimpleNamespace(
+            VERIFICATION_URL="https://callback.example/verify/code",
+            proxy={"http": "http://proxy", "https": "http://proxy"},
+            timeout=30,
+            run_payload_str=lambda request_data, payload: (
+                make_response(text="target response"),
+                {"request": payload, "response": "target response"},
+            ),
+        )
+
+        results = list(REQUEST.run(
+            {"payload": ["callback-payload"]},
+            {},
+            {"parameter": "url"},
+            injector,
+        ))
+
+        get.assert_called_once_with(
+            injector.VERIFICATION_URL,
+            proxies=injector.proxy,
+            verify=False,
+            timeout=injector.timeout,
+        )
+        self.assertIs(results[0][1][0], verification_response)
+
+    def test_local_server_base_url_is_exposed_to_definition_loader(self):
+        from ptinjector.ptinjector import PtInjector
+
+        injector = object.__new__(PtInjector)
+        injector.RANDOM_STRING = "1234567890"
+        injector.get_local_ip = lambda: "127.0.0.1"
+        injector.start_local_server = lambda host, port: None
+        args = SimpleNamespace(start_local_server="5000", verification_url=None)
+
+        verification_url, _ = injector.setup_verification_url(args)
+
+        self.assertEqual(args.verification_url, "http://127.0.0.1:5000")
+        self.assertEqual(verification_url, "http://127.0.0.1:5000/verify/1234567890")
+
+
+class RequestPreparationTest(unittest.TestCase):
+    def test_cookie_user_agent_and_header_values_are_prepared(self):
+        from ptinjector.ptinjector import headers_cookies_prepare
+
+        args = SimpleNamespace(
+            cookie=[["PHPSESSID=abc", "language=en"]],
+            user_agent="Custom Agent",
+            data=None,
+            headers=[["Authorization: Bearer abc:def"]],
+        )
+
+        headers = headers_cookies_prepare(args)
+
+        self.assertEqual(headers["Cookie"], "PHPSESSID=abc;language=en")
+        self.assertEqual(headers["User-Agent"], "Custom Agent")
+        self.assertEqual(headers["Authorization"], "Bearer abc:def")
+
+    def test_parse_args_resolves_request_file_from_working_directory(self):
+        from ptinjector import ptinjector as core
+
+        core.SCRIPTNAME = "ptinjector"
+        argv = [
+            "ptinjector",
+            "--request-file", "fixtures/request.txt",
+            "--user-agent", "Custom Agent",
+            "--verify-url", "https://callback.example",
+            "--timeout", "15",
+            "--headers", "Authorization: Bearer abc:def",
+        ]
+        with patch.object(sys, "argv", argv), patch.object(core.ptprinthelper, "print_banner"):
+            args = core.parse_args()
+
+        self.assertEqual(args.request_file, os.path.abspath("fixtures/request.txt"))
+        self.assertEqual(args.user_agent, "Custom Agent")
+        self.assertEqual(args.verification_url, "https://callback.example")
+        self.assertEqual(args.timeout, 15)
+        self.assertEqual(args.headers, [["Authorization: Bearer abc:def"]])
 
 
 class PayloadGeneratorTest(unittest.TestCase):

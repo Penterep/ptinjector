@@ -60,22 +60,26 @@ def json_to_pathtags(loaded_json):
     return set(result)
 
 def tagset(response) -> set:
-    content_type = response.headers['Content-Type']
-    if  content_type == 'text/html':
-        tmp_list = list(bsoup(response.text, 'html.parser').find_all('a'))
-        return {x.decode_contents() for x in tmp_list}
-    elif content_type in {"application/json", "text/x-json", "text/json"}:
-        return json_to_pathtags(json.loads(response.text))
+    content_type = response.headers.get('Content-Type', '').split(';', 1)[0].strip().casefold()
 
-    elif content_type == "application/xml":
-        elements = set()
-        tree = ET.fromstring(response.text)
-        for elem in tree.iter():
-            elements.add((elem.tag, elem.text))
-        return elements
+    try:
+        if content_type == 'text/html':
+            links = bsoup(response.text, 'html.parser').find_all('a')
+            return {link.decode_contents() for link in links}
 
-    else:
-        return {response.content}
+        if content_type in {"application/json", "text/x-json", "text/json"}:
+            return json_to_pathtags(json.loads(response.text))
+
+        if content_type in {"application/xml", "text/xml"}:
+            elements = set()
+            tree = ET.fromstring(response.text)
+            for elem in tree.iter():
+                elements.add((elem.tag, elem.text))
+            return elements
+    except (ET.ParseError, json.JSONDecodeError, TypeError):
+        pass
+
+    return {response.content}
 
 
 def error_code_check(responses, verification_list):
@@ -115,7 +119,7 @@ def equivalence_check(responses, verification_list):
         common_contents = common_contents.intersection(contents)
         response_contents.append(contents)
 
-    response_contents_filtered = (map(lambda c: c.difference(common_contents).difference(false_contents), response_contents))
+    response_contents_filtered = [c.difference(common_contents).difference(false_contents) for c in response_contents]
     total_elements = sum(len(s) for s in response_contents_filtered)
     contents_union = set()
     for s in response_contents_filtered:
@@ -130,6 +134,9 @@ def equivalence_check(responses, verification_list):
 
 
 def increasing_limit_check(responses, verification_list):
+    if len(responses) < 2 or any(response.status_code != 200 for response in responses):
+        return False
+
     differencesum = 0
     prev = set(bsoup(responses[0].text, 'html.parser').text.splitlines())
     for i in range(1, len(responses)):
@@ -156,4 +163,3 @@ def check_if_vulnerable(responses, verification_list, injector):
             return True
 
     return False
-

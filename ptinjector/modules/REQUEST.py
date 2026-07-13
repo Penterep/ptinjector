@@ -1,20 +1,29 @@
 
+import requests
+
 
 def run(payload_object, definition_contents, request_data, injector):
-    responses = []
-    payloads = []
     for payload_str in payload_object["payload"]:
         response, dump = injector.run_payload_str(request_data, payload_str)
-        yield [payload_str], [response], dump
+        verification_response = requests.get(
+            injector.VERIFICATION_URL,
+            proxies=injector.proxy,
+            verify=False,
+            timeout=injector.timeout,
+        )
+        yield [payload_str], [verification_response], dump
 
 
 def check_if_vulnerable(responses, verification_list, injector):
-    """Verify request type payloads"""
-    # Send requests to /verify endpoint of verification-url.
+    """Return True when the verification service confirms the callback."""
+    if len(responses) != 1:
+        return False
+
+    response = responses[0]
+    if response.status_code != 200:
+        return False
+
     try:
-        res, dump = injector._send_payload(injector.VERIFICATION_URL, "")
-        if res.json().get("msg") == "true":
-            return True
-    except requests.exceptions.RequestException as e:
-        injector.ptjsonlib.end_error(f"Error connecting to {injector.VERIFICATION_URL}", details=e, condition=injector.use_json)
+        return str(response.json().get("msg", "")).casefold() == "true"
+    except (AttributeError, TypeError, ValueError):
         return False
