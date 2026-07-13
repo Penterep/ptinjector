@@ -160,10 +160,7 @@ class PtInjector:
 
 
     def print_results(self, parameter, confirmed_payloads, sent_payloads, vulnerability_name, vulnerability_description, incomplete=False):
-        ptprinthelper.ptprint("Testing: " + f"{vulnerability_name.upper() if not vulnerability_description else vulnerability_description}", "TITLE", colortext=True, condition=(not self.use_json), newline_above=True)
-
         def print_results_for_parameter(parameter, confirmed: List[str], sent_list: List[str]):
-            ptprinthelper.ptprint(f"Testing parameter: <{ptprinthelper.get_colored_text(parameter, 'TITLE')}>", "TITLE", not self.use_json, colortext=False, clear_to_eol=True, newline_above=False)
             for payload in sent_list:
                 if self.args.verbose and payload:
                     ptprinthelper.ptprint(f"Sending payload: {payload}", "", condition=(not self.use_json), end=f"\n", colortext=False, clear_to_eol=True, indent=4)
@@ -196,9 +193,24 @@ class PtInjector:
 
             self.is_valid_request(args)
             vulnerability_description: str = definition_contents.get('description', vulnerability_name)
+            ptprinthelper.ptprint(
+                "Testing: " + (vulnerability_description or vulnerability_name.upper()),
+                "TITLE",
+                colortext=True,
+                condition=not self.use_json,
+                newline_above=True,
+            )
 
             for request_data in self.generate_request_data(args):
                 parameter = request_data['parameter']
+                ptprinthelper.ptprint(
+                    f"Testing parameter: <{ptprinthelper.get_colored_text(parameter, 'TITLE')}>",
+                    "TITLE",
+                    condition=not self.use_json,
+                    colortext=False,
+                    clear_to_eol=True,
+                    newline_above=False,
+                )
                 confirmed_payloads = []
                 sent_payloads = []
                 parameter_incomplete = False

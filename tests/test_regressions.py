@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 
 from ptinjector import payloadgenerator
 from ptinjector.modules import BOOLEAN, HEADER, HOST_HEADER, HTML_ATTR, HTML_TAG, REDIRECT, REGEX, REQUEST, TIME
+from ptlibs import ptprinthelper
 
 
 def make_response(*, seconds=0, text="", content=None, headers=None, status_code=200):
@@ -605,6 +606,38 @@ class ErrorHandlingTest(unittest.TestCase):
         properties = injector.ptjsonlib.json_object["results"]["properties"]
         self.assertTrue(properties["incomplete"])
         self.assertEqual(len(properties["requestErrors"]), 1)
+
+    def test_scan_prints_test_and_parameter_before_sending_payloads(self):
+        injector = self.make_injector()
+        injector.use_json = False
+        injector.LOADED_DEFINITIONS = {
+            "test": {
+                "description": "Test vulnerability",
+                "payloads": [{"type": "REGEX"}],
+            }
+        }
+        injector.is_valid_request = MagicMock()
+        injector.generate_request_data = MagicMock(return_value=[{"parameter": "id"}])
+        injector.print_results = MagicMock()
+        injector.args = SimpleNamespace(verbose=False)
+        events = []
+
+        def record_payload(*args, **kwargs):
+            events.append("payload")
+            return [], []
+
+        injector.run_payload_object = record_payload
+        args = SimpleNamespace(technology=set())
+
+        with patch.object(ptprinthelper, "ptprint") as print_mock:
+            print_mock.side_effect = lambda message, *args, **kwargs: events.append(message)
+            injector.run(args)
+
+        self.assertLess(events.index("Testing: Test vulnerability"), events.index("payload"))
+        parameter_event = next(
+            event for event in events if isinstance(event, str) and event.startswith("Testing parameter:")
+        )
+        self.assertLess(events.index(parameter_event), events.index("payload"))
 
 
 class PayloadGeneratorTest(unittest.TestCase):
