@@ -163,9 +163,9 @@ class PtInjector:
         def print_results_for_parameter(parameter, confirmed: List[str], sent_list: List[str]):
             for payload in sent_list:
                 if self.args.verbose and payload:
-                    ptprinthelper.ptprint(f"Sending payload: {payload}", "", condition=(not self.use_json), end=f"\n", colortext=False, clear_to_eol=True, indent=4)
+                    ptprinthelper.ptprint(f"Sending payload: {payload}", "ADDITIONS", condition=(not self.use_json), end=f"\n", colortext=True, clear_to_eol=True, indent=4)
                 elif payload:
-                    ptprinthelper.ptprint(f"Sending payload: {payload[:80] + '...' if len(payload) > 100 else payload}", "", condition=(not self.use_json), end=f"\r",        colortext=False, clear_to_eol=True, indent=4)
+                    ptprinthelper.ptprint(f"Sending payload: {payload[:80] + '...' if len(payload) > 100 else payload}", "ADDITIONS", condition=(not self.use_json), end=f"\r",        colortext=True, clear_to_eol=True, indent=4)
 
             if confirmed:
                 ptprinthelper.ptprint(f"Vulnerable to {vulnerability_description}", "VULN", condition=not self.use_json, colortext=True, clear_to_eol=True, indent=4)
