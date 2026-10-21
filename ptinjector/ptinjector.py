@@ -120,6 +120,18 @@ class PtInjector:
         self.consecutive_request_errors = 0
         return result
 
+    def send_original_request(self, request_data):
+        scheme = request_data["url"].split("://", 1)[0]
+
+        url, http_method, headers, data = self.request_parser.parse_http_request(
+            http_request =request_data["original_http_request"],
+            scheme=scheme
+            )
+
+        response,_ = ptmisclib.load_url_from_web_or_temp(url, method=http_method, headers=headers, data=data, redirects=False, proxies=self.proxy, verify=False, timeout=self.timeout, dump_response=True)
+
+        return response
+
     def record_request_error(self, error, context, count_toward_abort=True):
         """Record a recoverable request failure without misreporting a negative result."""
         error_record = {
@@ -215,7 +227,21 @@ class PtInjector:
                 sent_payloads = []
                 parameter_incomplete = False
 
-                for payload_object in definition_contents.get("payloads", []):
+                payload_objects = definition_contents.get("payloads", [])
+
+                if vulnerability_name == "xss":
+                    try:
+                        request_data["baseline_response"] = self.send_original_request(request_data) 
+                        self.consecutive_request_errors=0
+                    except requests.exceptions.RequestException as error:
+                        self.record_request_error(
+                            error,
+                            context=f"XSS control request on parameter {parameter}"
+                        )
+                        parameter_incomplete = True
+                        payload_objects = []
+
+                for payload_object in payload_objects:
                     errors_before_payload = len(self.scan_errors)
                     try:
                         new_confirmed_payloads, new_sent_payloads = self.run_payload_object(payload_object, definition_contents, request_data, vulnerability_name)
@@ -491,33 +517,46 @@ class PtInjector:
         """
 
         def build_and_mark_request(parameter):
-            """Builds a request template and marks a placeholder for the specified parameter."""
+            """Builds a request template and marks a placeholder for the specified parameter."""            
+
             if args.request_file:
-                http_request = self.request_parser.mark_placeholder(http_request=args.request_file, parameter=parameter)
+
+
+                with open(args.request_file, "r") as file:
+                    original_http_request = file.read()
+
+                http_request = self.request_parser.mark_placeholder(http_request=original_http_request, parameter=parameter)
+
             else:
                 http_request = self.request_parser.build_request(url=args.url, headers=self.http_headers, request_data=args.data)
-                http_request = self.request_parser.mark_placeholder(http_request=http_request, parameter=parameter)
-            return http_request
 
-        def parse_and_yield_request(parameter_name, http_request):
+
+                original_http_request = http_request
+
+                http_request = self.request_parser.mark_placeholder(http_request=http_request, parameter=parameter)
+            return http_request, original_http_request
+
+        def parse_and_yield_request(parameter_name, http_request, original_http_request):
             """Parses the HTTP request and yields a dictionary with request data components."""
             scheme = self.args.url.split("://")[0] if self.args.url else "http"
             url, method, headers, request_data = self.request_parser.parse_http_request(http_request=http_request, scheme=scheme)
-            yield {"parameter": parameter_name, "url": url, "method": method, "headers": headers, "data": request_data}
+            yield {"parameter": parameter_name, "url": url, "method": method, "headers": headers, "data": request_data, "original_http_request":original_http_request}
 
         # Generování požadavků na základě přítomných parametrů
         if args.parameter:
             # Single parameter case
-            http_request = build_and_mark_request(args.parameter)
-            yield from parse_and_yield_request(args.parameter, http_request)
+
+            http_request, original_http_request = build_and_mark_request(args.parameter)
+            yield from parse_and_yield_request(args.parameter, http_request, original_http_request)
         else:
             # Multiple parameters case
             parameter_index = 0
             while True:
                 try:
-                    http_request = build_and_mark_request(parameter_index)
+
+                    http_request, original_http_request = build_and_mark_request(parameter_index)
                     parameter_name = self.request_parser.get_parameter_name_by_index(http_request, parameter_index)
-                    yield from parse_and_yield_request(parameter_name, http_request)
+                    yield from parse_and_yield_request(parameter_name, http_request, original_http_request)
                     parameter_index += 1
                 except IndexError:
                     break  # Konec při dosažení posledního parametru

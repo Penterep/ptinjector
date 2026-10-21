@@ -2,7 +2,7 @@ from bs4 import BeautifulSoup
 from collections import Counter
 
 def run(payload_object, definition_contents, request_data, injector):
-    baseline_response, _ = injector.run_payload_str(request_data, injector.RANDOM_STRING)
+    baseline_response = request_data["baseline_response"]
 
     for payload_str in payload_object["payload"]:
         response, dump = injector.run_payload_str(request_data, payload_str)
