@@ -538,10 +538,19 @@ class RequestPreparationTest(unittest.TestCase):
             "--timeout", "15",
             "--headers", "Authorization: Bearer abc:def",
         ]
-        with patch.object(sys, "argv", argv), patch.object(core.ptprinthelper, "print_banner"):
-            args = core.parse_args()
 
-        self.assertEqual(args.request_file, os.path.abspath("fixtures/request.txt"))
+        with tempfile.TemporaryDirectory() as temp_dir:
+            request_path = os.path.join(temp_dir, "request.txt")
+
+            with open(request_path, "w") as file:
+                file.write("GET /?login=test HTTP/1.1\nHost: example.test\n\n")
+
+            argv[2] = os.path.relpath(request_path)
+
+            with patch.object(sys, "argv", argv), patch.object(core.ptprinthelper, "print_banner"):
+                args = core.parse_args()
+
+        self.assertEqual(args.request_file, os.path.abspath(argv[2]))
         self.assertEqual(args.user_agent, "Custom Agent")
         self.assertEqual(args.verification_url, "https://callback.example")
         self.assertEqual(args.timeout, 15)

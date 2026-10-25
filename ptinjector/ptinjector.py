@@ -68,6 +68,26 @@ def header_pair(value):
     return value
 
 
+def read_request_input(value):
+    request_path = os.path.expanduser(value)
+
+    if os.path.isfile(request_path):
+        with open(request_path, "r") as file:
+            original_http_request = file.read()
+    else:
+        original_http_request = base64.b64decode(
+            value,
+            validate=True,
+        ).decode("utf-8")
+
+    #cleaning rf file from \n \r
+    original_http_request = original_http_request.replace("\r\n", "\n").replace("\r", "\n")
+    headers, separator, body = original_http_request.partition("\n\n")
+    body = re.sub(r"(\r|\n|%0D|%0A)+\Z", "", body, flags=re.IGNORECASE)
+    original_http_request = headers + separator + body
+
+    return original_http_request
+
 class PtInjector:
     def __init__(self, args):
         self.ptjsonlib: object                              = ptjsonlib.PtJsonLib()
@@ -83,7 +103,7 @@ class PtInjector:
         self.consecutive_request_errors                    = 0
         self.abort_scan                                    = False
         self.VERIFICATION_URL, self.BASE64_VERIFICATION_URL = self.setup_verification_url(args)
-        self.PLACEHOLDER_EXISTS: bool                       = True if args.request_file else self.check_if_placeholder_exists()
+        self.PLACEHOLDER_EXISTS: bool                       = self.check_if_placeholder_exists(args)
         self.URL_PLACEHOLDER_INDEX: int                     = -1
         self.LOADED_DEFINITIONS: dict                       = self.load_definitions(args, random_string=self.RANDOM_STRING)
         self.request_parser: object                         = HttpRequestParser(ptjsonlib=self.ptjsonlib, use_json=self.use_json, placeholder=self.PLACEHOLDER_SYMBOL)
@@ -298,6 +318,17 @@ class PtInjector:
         #    ptprinthelper.ptprint(f"Sending payload: {payload[:80] + '...' if len(payload) > 100 else payload}", "", condition=(not self.use_json), end=f"\r",         colortext=False, clear_to_eol=True, indent=4)
         param, url, http_method, headers, data = rdata["parameter"], rdata["url"], rdata["method"], rdata["headers"], rdata["data"]
 
+        attack_headers = {}
+
+        for name, value in headers.items():
+            new_name = name.replace(self.PLACEHOLDER_SYMBOL, payload)
+            attack_headers[new_name] = value.replace(
+                self.PLACEHOLDER_SYMBOL, payload
+        )
+
+        headers = attack_headers
+
+
         URL_PLACEHOLDER_INDEX = self.get_placeholder_from_url(url)
         if URL_PLACEHOLDER_INDEX != -1:
             # Payload marker is in <url>
@@ -306,7 +337,7 @@ class PtInjector:
             return response, dump
         else:
             # Payload  marker is in <request data>
-            request_data = re.sub(self.PLACEHOLDER_SYMBOL, lambda _: payload, data) # Use a callable to substitute the payload directly
+            request_data = data.replace(self.PLACEHOLDER_SYMBOL, payload)
             return ptmisclib.load_url_from_web_or_temp(url, method=http_method, headers=headers, proxies=self.proxy, data=request_data, redirects=False, verify=False, timeout=self.timeout, dump_response=True)
 
         # TODO: Header injection: attack_data = self.payload2dict(self.str2dict(), payload)
@@ -337,28 +368,41 @@ class PtInjector:
             self.ptjsonlib.end_error("invalid data", self.use_json)
         return result
 
-    def get_placeholder_from_url(self, url) -> Tuple[str, int]:
-        """Extracts the placeholder from the URL."""
-        placeholder_position: int = url.find(self.PLACEHOLDER_SYMBOL) # Returns -1 if not present
+    def get_placeholder_from_url(self, url) -> int:
+        """Return the position of the injection marker in the URL."""
         parsed_url = urllib.parse.urlparse(url)
-        pathless_url = urllib.parse.urlunparse((parsed_url.scheme, parsed_url.netloc, "/", "", "", "")) # https://www.example.com/
 
-        if placeholder_position != -1 and placeholder_position < len(pathless_url):
-            self.ptjsonlib.end_error("Wrong placeholder usage (placeholder supported only in PATH)", self.use_json)
-        if not re.match("https?", parsed_url.scheme):
-            self.ptjsonlib.end_error(f"Missing or wrong scheme, did you mean https://{url}?", self.use_json)
-        return placeholder_position
+        if parsed_url.scheme not in ("http", "https"):
+            self.ptjsonlib.end_error(
+                f"Missing or wrong scheme, did you mean https://{url}?",
+                self.use_json,
+            )
 
-    def check_if_placeholder_exists(self):
-        """Check for presence of placeholder in <sys.argv>"""
+        return url.find(self.PLACEHOLDER_SYMBOL)
+
+    def check_if_placeholder_exists(self, args):
+        """Check for an injection marker in request content."""
+        if args.request_file:
+            values = [args.request_text]
+        else:
+            values = [args.url or "", args.data or ""]
+
+            for name, value in self.http_headers.items():
+                values.append(name)
+                values.append(value)
+
         placeholder_count = 0
-        for arg in list(sys.argv[1:]):
-            placeholder_count += arg.count(self.PLACEHOLDER_SYMBOL)
+        for value in values:
+            placeholder_count += value.count(self.PLACEHOLDER_SYMBOL)
 
         if placeholder_count > 1:
-            self.ptjsonlib.end_error(f"Only one occurrence of placeholder '*' character is allowed, found {str(placeholder_count)}", self.use_json)
+            self.ptjsonlib.end_error(
+                f"Only one occurrence of placeholder "
+                f"'{self.PLACEHOLDER_SYMBOL}' is allowed, found {placeholder_count}",
+                self.use_json,
+            )
 
-        return True if placeholder_count else False
+        return placeholder_count == 1
 
     def get_local_ip(self):
         try:
@@ -495,13 +539,22 @@ class PtInjector:
         """
 
         if args.request_file:
-            http_request = self.request_parser.is_valid_http_request(args.request_file)
+            http_request = self.request_parser.is_valid_http_request(args.request_text)
             _req_data = self.request_parser.get_request_data(http_request)
-            if not _req_data and not self.request_parser.has_query_params(args.request_file):
+            if (
+                not self.PLACEHOLDER_EXISTS
+                and not _req_data
+                and not self.request_parser.has_query_params(args.request_text)
+            ):
                 self.ptjsonlib.end_error(f"Provided request file contains no parameters to test.", self.use_json)
         else:
             parsed_url = urllib.parse.urlparse(args.url)
-            if (not parsed_url.path or parsed_url.path == "/") and not parsed_url.query and not args.data:
+            if (
+                not self.PLACEHOLDER_EXISTS
+                and (not parsed_url.path or parsed_url.path == "/")
+                and not parsed_url.query
+                and not args.data
+            ):
                 self.ptjsonlib.end_error(f"Provided URL contains no parameters to test.", self.use_json)
         return True
 
@@ -515,20 +568,28 @@ class PtInjector:
         :param args: Input arguments with data needed to build requests.
         :yield: A dictionary with request components (URL, data, method, headers, parameter).
         """
-
+        request_url = args.url
+        if request_url:
+            parsed_url = urllib.parse.urlparse(request_url)
+            if not parsed_url.path:
+                request_url = parsed_url._replace(path="/").geturl()
+        
         def build_and_mark_request(parameter):
             """Builds a request template and marks a placeholder for the specified parameter."""            
 
+           
+
             if args.request_file:
 
+                original_http_request = args.request_text
+                http_request = self.request_parser.mark_placeholder(
+                    http_request=original_http_request,
+                    parameter=parameter
+                )
 
-                with open(args.request_file, "r") as file:
-                    original_http_request = file.read()
-
-                http_request = self.request_parser.mark_placeholder(http_request=original_http_request, parameter=parameter)
 
             else:
-                http_request = self.request_parser.build_request(url=args.url, headers=self.http_headers, request_data=args.data)
+                http_request = self.request_parser.build_request(url=request_url, headers=self.http_headers, request_data=args.data)
 
 
                 original_http_request = http_request
@@ -541,6 +602,35 @@ class PtInjector:
             scheme = self.args.url.split("://")[0] if self.args.url else "http"
             url, method, headers, request_data = self.request_parser.parse_http_request(http_request=http_request, scheme=scheme)
             yield {"parameter": parameter_name, "url": url, "method": method, "headers": headers, "data": request_data, "original_http_request":original_http_request}
+
+
+        if self.PLACEHOLDER_EXISTS:
+            if args.parameter:
+                self.ptjsonlib.end_error(
+                    "Cannot combine --parameter and a manual injection marker.",
+                    self.use_json,
+                )
+
+            if args.request_file:
+                http_request = args.request_text
+            else:
+                http_request = self.request_parser.build_request(
+                    url=request_url,
+                    headers=self.http_headers.copy(),
+                    request_data=args.data,
+                )
+
+            original_http_request = http_request.replace(
+                self.PLACEHOLDER_SYMBOL, ""
+            )
+
+            yield from parse_and_yield_request(
+                "placeholder", http_request, original_http_request
+            )
+
+            return
+
+
 
         # Generování požadavků na základě přítomných parametrů
         if args.parameter:
@@ -622,12 +712,29 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("-k",  "--keep-testing",        action="store_true")
     parser.add_argument("-j",  "--json",                action="store_true")
     parser.add_argument("-v",  "--version",             action="version", version=f"{SCRIPTNAME} {__version__}")
-    parser.add_argument("--placeholder",                type=str, default="<INJECT_HERE>")
+    parser.add_argument("--placeholder",                type=str, default="*")
 
     args = parser.parse_args()
     if args.timeout <= 0:
         parser.error("--timeout must be greater than zero")
-    args.request_file = os.path.abspath(os.path.expanduser(args.request_file)) if args.request_file else None
+
+    args.request_text = None
+
+    if args.request_file is not None:
+        request_path = os.path.expanduser(args.request_file)
+
+        if os.path.isfile(request_path):
+            args.request_file = os.path.abspath(request_path)
+
+        try:
+            args.request_text = read_request_input(args.request_file)
+        except (OSError, ValueError) as error:
+            parser.error(f"Invalid request file or Base64 input: {error}")
+
+        if not args.request_text.strip():
+            parser.error("Request input must not be empty")
+        
+
     ptprinthelper.print_banner(SCRIPTNAME, __version__, args.json, space=0)
     return args
 

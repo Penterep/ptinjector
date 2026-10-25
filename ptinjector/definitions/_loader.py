@@ -25,9 +25,7 @@ class DefinitionsLoader:
             self.ptjsonlib: object = ptjsonlib.PtJsonLib()
             request_parser: object = HttpRequestParser(ptjsonlib=ptjsonlib, use_json=False, placeholder=args.placeholder)
 
-            f = open(args.request_file)
-            raw_request = f.read()
-            f.close()
+            raw_request = args.request_text
             url, method, headers, request_data = parse = request_parser.parse_http_request(raw_request)
             self.TESTED_URL = urlparse(url).netloc
 
