@@ -3,7 +3,7 @@
     "vulnerability": "PTV-WEB-SANIT-OUTPUTENC",
     "payloads": [
         {
-            "payload": "'\"><hr>\"'",
+            "payload": "'\"><foo>\"'",
             "verify": [
                 "foo"
             ],

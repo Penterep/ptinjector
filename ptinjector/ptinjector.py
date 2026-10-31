@@ -32,12 +32,13 @@ import importlib
 import requests
 from bs4 import BeautifulSoup
 from ptlibs import ptprinthelper, ptmisclib, ptjsonlib, ptnethelper, ptcharsethelper
-from ptlibs.parsers.http_request_parser import HttpRequestParser
+from request_parser import InjectionRequestParser
 
 from _version import __version__
 from definitions._loader import DefinitionsLoader
 
 MAX_CONSECUTIVE_REQUEST_ERRORS = 3
+INJECTION_MARKER = "{{*}}"
 
 def headers_cookies_prepare(args):
     headers_dict = dict()
@@ -60,12 +61,26 @@ def headers_cookies_prepare(args):
     return headers_dict
 
 
+
+
 def header_pair(value):
     """Validate a header while allowing colons in its value."""
     header_name, separator, _ = value.partition(":")
     if not separator or not header_name.strip():
         raise argparse.ArgumentTypeError("Header must use the 'Name: Value' format")
     return value
+def normalize_cli_markers(value, input_marker):
+    if value is None: 
+        return None
+
+    parts = value.split(INJECTION_MARKER)
+    result = []
+
+    for part in parts:
+        changed_part = part.replace(input_marker, INJECTION_MARKER)
+        result.append(changed_part)
+        
+    return INJECTION_MARKER.join(result) 
 
 
 def read_request_input(value):
@@ -106,7 +121,7 @@ class PtInjector:
         self.PLACEHOLDER_EXISTS: bool                       = self.check_if_placeholder_exists(args)
         self.URL_PLACEHOLDER_INDEX: int                     = -1
         self.LOADED_DEFINITIONS: dict                       = self.load_definitions(args, random_string=self.RANDOM_STRING)
-        self.request_parser: object                         = HttpRequestParser(ptjsonlib=self.ptjsonlib, use_json=self.use_json, placeholder=self.PLACEHOLDER_SYMBOL)
+        self.request_parser: object                         = InjectionRequestParser(ptjsonlib=self.ptjsonlib, use_json=self.use_json, placeholder=self.PLACEHOLDER_SYMBOL)
         self.args                                                      = args
         self.modules                                               = self.load_modules(os.path.join(os.path.dirname(__file__), 'modules'))
         self.timeout = args.timeout
@@ -249,7 +264,8 @@ class PtInjector:
 
                 payload_objects = definition_contents.get("payloads", [])
 
-                if vulnerability_name == "xss":
+
+                if  vulnerability_name == "xss" :
                     try:
                         request_data["baseline_response"] = self.send_original_request(request_data) 
                         self.consecutive_request_errors=0
@@ -395,14 +411,10 @@ class PtInjector:
         for value in values:
             placeholder_count += value.count(self.PLACEHOLDER_SYMBOL)
 
-        if placeholder_count > 1:
-            self.ptjsonlib.end_error(
-                f"Only one occurrence of placeholder "
-                f"'{self.PLACEHOLDER_SYMBOL}' is allowed, found {placeholder_count}",
-                self.use_json,
-            )
+        if placeholder_count >= 1:
+            return True
 
-        return placeholder_count == 1
+        return False
 
     def get_local_ip(self):
         try:
@@ -581,7 +593,7 @@ class PtInjector:
 
             if args.request_file:
 
-                original_http_request = args.request_text
+                original_http_request = args.request_text.replace(self.PLACEHOLDER_SYMBOL, "")
                 http_request = self.request_parser.mark_placeholder(
                     http_request=original_http_request,
                     parameter=parameter
@@ -592,9 +604,9 @@ class PtInjector:
                 http_request = self.request_parser.build_request(url=request_url, headers=self.http_headers, request_data=args.data)
 
 
-                original_http_request = http_request
+                original_http_request = http_request.replace(self.PLACEHOLDER_SYMBOL, "")
 
-                http_request = self.request_parser.mark_placeholder(http_request=http_request, parameter=parameter)
+                http_request = self.request_parser.mark_placeholder(http_request=original_http_request, parameter=parameter)
             return http_request, original_http_request
 
         def parse_and_yield_request(parameter_name, http_request, original_http_request):
@@ -605,11 +617,7 @@ class PtInjector:
 
 
         if self.PLACEHOLDER_EXISTS:
-            if args.parameter:
-                self.ptjsonlib.end_error(
-                    "Cannot combine --parameter and a manual injection marker.",
-                    self.use_json,
-                )
+                
 
             if args.request_file:
                 http_request = args.request_text
@@ -620,15 +628,26 @@ class PtInjector:
                     request_data=args.data,
                 )
 
+            parts = http_request.split(self.PLACEHOLDER_SYMBOL)
+            places_to_inject = []
+
+            for i in range(len(parts) - 1):
+
+                parts = http_request.split(self.PLACEHOLDER_SYMBOL)
+                parts[i] = parts[i].replace(parts[i], parts[i] + self.PLACEHOLDER_SYMBOL)
+                parts = "".join(parts)
+                places_to_inject.append(parts)
+
             original_http_request = http_request.replace(
-                self.PLACEHOLDER_SYMBOL, ""
+            self.PLACEHOLDER_SYMBOL, ""
             )
 
-            yield from parse_and_yield_request(
-                "placeholder", http_request, original_http_request
-            )
+            for i, place_to_inject in enumerate(places_to_inject):                    
+                yield from parse_and_yield_request(f"#{i + 1}",place_to_inject, original_http_request)
 
-            return
+            if not args.parameter:
+                return
+            
 
 
 
@@ -694,7 +713,7 @@ def parse_args() -> argparse.Namespace:
     exclusive = parser.add_mutually_exclusive_group(required=True)
     exclusive.add_argument("-u",  "--url",              type=str)
     exclusive.add_argument("-rf", "--request-file",     type=str)
-    parser.add_argument("-ts",  "--tests",               type=str,  nargs="+")
+    parser.add_argument("-ts",  "--tests",               type=str.lower,  nargs="+")
     parser.add_argument("-g",  "--technology",          type=str,  nargs="+", default=set())
     parser.add_argument("-a",  "--user-agent", "--agent", "--user_agent", dest="user_agent", type=str)
     parser.add_argument(
@@ -717,6 +736,31 @@ def parse_args() -> argparse.Namespace:
     args = parser.parse_args()
     if args.timeout <= 0:
         parser.error("--timeout must be greater than zero")
+
+    input_marker = args.placeholder
+
+    if not input_marker:
+        parser.error("--placeholder must not be emty")
+
+    if not args.request_file:
+        args.url = normalize_cli_markers(args.url, input_marker )
+        args.data = normalize_cli_markers(args.data, input_marker )
+        args.user_agent = normalize_cli_markers(args.user_agent, input_marker )
+
+        if args.cookie:
+            for groups in args.cookie:
+                for i, group in enumerate(groups):
+                    groups[i] = normalize_cli_markers(group, input_marker)
+
+        if args.headers:
+            for groups in args.headers:
+                for i, group in enumerate(groups):
+                    groups[i] = normalize_cli_markers(group, input_marker)
+
+    
+    
+    args.placeholder = INJECTION_MARKER
+
 
     args.request_text = None
 
