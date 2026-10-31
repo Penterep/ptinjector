@@ -66,7 +66,7 @@ class DefinitionsLoader:
         """
         def gettags(d: dict) -> set:
             assert d is not None
-            return set(d.get('tags', {}))
+            return set(d.get('technologies', {}))
 
 
         def make_tag_checker(tags: set):

@@ -29,7 +29,7 @@
                 "PL/SQL: numeric or value error"
             ],
             "type": "regex",
-            "tags": ["oracle"]
+            "technologies": ["oracle"]
         },
         {
             "payload": [
@@ -41,7 +41,7 @@
                 "yntax error"
             ],
             "type": "regex",
-            "tags": ["microsoftsql"]
+            "technologies": ["microsoftsql"]
         },
         {
             "payload": [
@@ -53,7 +53,7 @@
                 "ERROR:  invalid input syntax for integer:"
             ],
             "type": "regex",
-            "tags": ["postgresql"]
+            "technologies": ["postgresql"]
         },
         {
             "payload": [
@@ -66,7 +66,7 @@
                 "mysqli_fetch_array() expects parameter"
             ],
             "type": "regex",
-            "tags": ["mysql", "mariadb"]
+            "technologies": ["mysql", "mariadb"]
         }
     ]
 }
