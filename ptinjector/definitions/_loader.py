@@ -169,7 +169,18 @@ class DefinitionsLoader:
 
         for payload_index, payload_object in reversed(list(enumerate(json_data["payloads"]))):
             # Check each item in "payloads" for required keys and non-empty values before processing.
-            if not all(key in payload_object and payload_object.get(key) for key in required_payload_keys) and not all(payload_object.get(key) for key in required_payload_keys):
+            is_boolean = str(payload_object.get("type", "")).upper() == "BOOLEAN"
+
+            if (
+               not all(key in payload_object for key in required_payload_keys)
+               or not payload_object.get("payload")
+                or not payload_object.get("type")
+               or (not is_boolean and not payload_object.get("verify"))
+                  or(
+                   is_boolean
+                  and not isinstance(payload_object.get("verify"), list)
+                )
+            ):
                 invalid_payloads.append(payload_object)
                 json_data["payloads"].pop(payload_index)
                 continue
@@ -197,8 +208,51 @@ class DefinitionsLoader:
             # REPLACE PLACEHOLDERS
             payload_object["verify"] = [re.sub(placeholders_re_pattern, replace_placeholder, text) for text in payload_object["verify"]]
             payload_object["verify"] = [text.replace("[tested.domain]", self.TESTED_URL, -1) for text in payload_object["verify"]]
+            if is_boolean:
+                pairs = payload_object["payload"]
+                valid_pairs = isinstance(pairs, list)
+
+                if valid_pairs:
+                    for pair in pairs:
+                        if (
+                            not isinstance(pair, list)
+                            or len(pair) != 2
+                            or not isinstance(pair[0], str)
+                            or not isinstance(pair[1], str)
+                        ):
+                            valid_pairs = False
+                            break
+
+                if not valid_pairs: 
+                    invalid_payloads.append(payload_object)
+                    json_data["payloads"].pop(payload_index)
+                    continue
+
+                processed_pairs = []
+
+                for pair in pairs:
+                    processed_pair = []
+                    for payload in pair: 
+                        payload = re.sub(
+
+                            placeholders_re_pattern,replace_placeholder, payload
+                        )
+
+                        processed_pair.append(
+                            payload.replace("[tested.domain]", self.TESTED_URL)
+                        )
+
+                    processed_pairs.append(
+                        processed_pair
+                    )
+
+                payload_object["payload"] = processed_pairs
+                continue
+
+
 
             processed_payloads = []
+
             verification_urls = []
             is_request_payload = payload_object["type"].casefold() == "request"
             for payload_string_index, payload in enumerate(payload_object["payload"]):

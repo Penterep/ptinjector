@@ -3,79 +3,79 @@
     "vulnerability": "PTV-WEB-SANIT-OUTPUTENC",
     "payloads": [
         {
-            "payload": "'\"><foo>\"'",
+            "payload": "'\"><foo[RANDOM_10]>\"'",
             "verify": [
-                "foo"
+                "foo[RANDOM_10]"
             ],
             "type": "HTML_TAG"
         },
         {
-            "payload": "<foo>test</foo>",
+            "payload": "<foo[RANDOM_10]>test</foo[RANDOM_10]>",
             "verify": [
-                "foo"
+                "foo[RANDOM_10]"
             ],
             "type": "HTML_TAG"
         },
         {
-            "payload": "</title></textarea></script>'\"><foo>test</foo>",
+            "payload": "</title></textarea></script>'\"><foo[RANDOM_10]>test</foo[RANDOM_10]>",
             "verify": [
-                "foo"
+                "foo[RANDOM_10]"
             ],
             "type": "HTML_TAG"
         },
         {
-            "payload": "--><foo>test</foo>",
+            "payload": "--><foo[RANDOM_10]>test</foo[RANDOM_10]>",
             "verify": [
-                "foo"
+                "foo[RANDOM_10]"
             ],
             "type": "HTML_TAG"
         },
         {
-            "payload": "\"><foo>test</foo>",
+            "payload": "\"><foo[RANDOM_10]>test</foo[RANDOM_10]>",
             "verify": [
-                "foo"
+                "foo[RANDOM_10]"
             ],
             "type": "HTML_TAG"
         },
         {
-            "payload": "'><foo>test</foo>",
+            "payload": "'><foo[RANDOM_10]>test</foo[RANDOM_10]>",
             "verify": [
-                "foo"
+                "foo[RANDOM_10]"
             ],
             "type": "HTML_TAG"
         },
         {
-            "payload": "</title><foo>test</foo>",
+            "payload": "</title><foo[RANDOM_10]>test</foo[RANDOM_10]>",
             "verify": [
-                "foo"
+                "foo[RANDOM_10]"
             ],
             "type": "HTML_TAG"
         },
         {
-            "payload": "</textarea><foo>test</foo>",
+            "payload": "</textarea><foo[RANDOM_10]>test</foo[RANDOM_10]>",
             "verify": [
-                "foo"
+                "foo[RANDOM_10]"
             ],
             "type": "HTML_TAG"
         },
         {
-            "payload": "</script><foo>test</foo>",
+            "payload": "</script><foo[RANDOM_10]>test</foo[RANDOM_10]>",
             "verify": [
-                "foo"
+                "foo[RANDOM_10]"
             ],
             "type": "HTML_TAG"
         },
         {
-            "payload": "' foo='",
+            "payload": "' foo[RANDOM_10]='",
             "verify": [
-                "foo"
+                "foo[RANDOM_10]"
             ],
             "type": "HTML_ATTR"
         },
         {
-            "payload": "\" foo=\"",
+            "payload": "\" foo[RANDOM_10]=\"",
             "verify": [
-                "foo"
+                "foo[RANDOM_10]"
             ],
             "type": "HTML_ATTR"
         }

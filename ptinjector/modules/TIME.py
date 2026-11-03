@@ -1,6 +1,14 @@
 
 
 MIN_DELAY_RATIO = 0.8
+from ptinjector.response_utils import get_response_chain
+def response_time(response):
+    total = 0.0
+
+    for part in get_response_chain(response):
+        total += part.elapsed.total_seconds()
+
+    return total
 
 
 def expected_delay(verification_list):
@@ -22,8 +30,8 @@ def pair_has_expected_delay(baseline_response, payload_response, delay):
     ):
         return False
 
-    baseline_time = baseline_response.elapsed.total_seconds()
-    payload_time = payload_response.elapsed.total_seconds()
+    baseline_time = response_time(baseline_response)
+    payload_time = response_time(payload_response)
     return payload_time - baseline_time >= delay * MIN_DELAY_RATIO
 
 

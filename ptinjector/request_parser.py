@@ -93,3 +93,29 @@ class InjectionRequestParser(HttpRequestParser):
         url, method, headers, request_data = self.parse_http_request(http_request)
         parsed_query: dict = urllib.parse.parse_qs(urllib.parse.urlparse(url).query, keep_blank_values = True)
         return bool(parsed_query)
+
+    def get_parameter_value(self, http_request, parameter):
+        url, method, headers, data = self.parse_http_request(http_request)
+        query = urllib.parse.urlparse(url).query
+        get_parameters = urllib.parse.parse_qsl(
+            query, keep_blank_values=True
+        )
+        content_type = self.get_content_type(headers)
+        post_parameters = self._parse_post_data(data, content_type)
+
+        if isinstance(parameter, str) and parameter.isdigit():
+            parameter = int(parameter)
+
+        if isinstance(parameter, int):
+            parameters = get_parameters + list(post_parameters.items())
+            if parameter < 0 or parameter >= len(parameters):
+                raise IndexError("Parameter index out of bounds")
+            return parameters[parameter][1]
+
+        get_parameters = dict(get_parameters)
+        if parameter in get_parameters:
+            return get_parameters[parameter]
+        if parameter in post_parameters:
+            return post_parameters[parameter]
+
+        raise ValueError(f"Parameter {parameter!r} not found")

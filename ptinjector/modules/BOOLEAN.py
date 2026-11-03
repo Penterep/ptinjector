@@ -2,20 +2,166 @@ from bs4 import BeautifulSoup as bsoup
 import hashlib
 import xml.etree.ElementTree as ET
 import json
+import re
+from difflib import SequenceMatcher
+import html
+from urllib.parse import quote, quote_plus, unquote, unquote_plus
+
 
 def get_md5(s: str):
     h = hashlib.new('md5', s.encode())
     return h.digest()
 
+def split_content(text):
+    return re.findall(r"\w+(?:[-:./+]\w+)*|[^\w]", text)
+
+def find_dynamic_regions(first_text, second_text):
+    first_parts = split_content(first_text)
+    second_parts = split_content(second_text)
+
+    matcher = SequenceMatcher(
+        None, first_parts, second_parts, autojunk= False
+    )
+
+    regions = []
+
+    for operation, start, end, other_start, other_end in matcher.get_opcodes():
+        if operation != "equal":
+            regions.append((start, end))
+    return {
+        "reference": first_parts,
+        "regions": regions,
+    }
+
+def remove_dynamic_content(text, models):
+    parts = split_content(text)
+    ignored = set()
+
+    for model in models:
+        if not model["regions"]:
+            continue
+
+        matcher = SequenceMatcher(
+            None, model["reference"], parts, autojunk=False
+        )
+
+        for operation, start, end, new_start, new_end in matcher.get_opcodes():
+            for dynamic_start, dynamic_end in model["regions"]:
+                if operation == "equal":
+                    left = max(start, dynamic_start)
+                    right = min(end, dynamic_end)
+                    for index in range(left, right):
+                        ignored.add(new_start + index - start)
+
+                elif start == end:
+                    if (
+                        dynamic_start < start < dynamic_end
+                        or dynamic_start == dynamic_end == start
+                    ):
+                        ignored.update(range(new_start, new_end))
+
+                elif dynamic_start <= start and end <= dynamic_end:
+                    ignored.update(range(new_start, new_end))
+
+    clean_parts = []
+    for index, part in enumerate(parts):
+        if index not in ignored:
+            clean_parts.append(part)
+
+    return "".join(clean_parts)
+
+
+def remove_reflected_payload(text, payload):
+    if not payload:
+        return text
+
+    payload_values = {payload, unquote(payload), unquote_plus(payload)}
+
+    try:
+        payload_values.add(json.loads('"' + payload + '"'))
+    except json.JSONDecodeError:
+        pass
+
+    variants = set()
+    for value in payload_values:
+        variants.update({
+            value,
+            html.escape(value),
+            html.escape(value, quote=False),
+            quote(value, safe=""),
+            quote_plus(value, safe=""),
+            json.dumps(value)[1:-1],
+            json.dumps(value, ensure_ascii=False)[1:-1],
+        })
+
+    for value in list(variants):
+        variants.add(value.replace("&#x27;", "&#39;"))
+
+
+    for value in sorted(variants, key=len, reverse=True):
+        text = text.replace(value, "[PAYLOAD]")
+
+    return text
+
+
+def get_baseline(request_data, injector):
+    if "boolean_baseline" in request_data:
+        return request_data["boolean_baseline"]
+
+    request_data["boolean_baseline"] = None
+    errors_before = len(injector.scan_errors)
+    invalid_value = f"ptinjector_invalid_{injector.RANDOM_STRING}"
+
+    invalid_first, _ = injector.run_payload_str(request_data, invalid_value)
+    invalid_second, _ = injector.run_payload_str(request_data, invalid_value)
+    valid_first = injector.send_original_request(request_data)
+    valid_second = injector.send_original_request(request_data)
+
+    if len(injector.scan_errors) != errors_before:
+        return None
+
+    baseline = {
+        "invalid": [invalid_first, invalid_second],
+        "valid": [valid_first, valid_second],
+        "dynamic_models": [
+            find_dynamic_regions(invalid_first.text, invalid_second.text),
+            find_dynamic_regions(valid_first.text, valid_second.text),
+
+        ]
+    }
+
+    request_data["boolean_baseline"] = baseline
+    return baseline
 
 def run(payload_object, definition_contents, request_data, injector):
-    responses = []
-    payloads = []
-    for payload_str in payload_object["payload"]:
-        response, dump = injector.run_payload_str(request_data, payload_str)
-        responses.append(response)
-        payloads.append(payload_str)
-    yield payloads, responses, dump
+    baseline = get_baseline(request_data, injector)
+    if baseline is None:
+        return
+
+    for true_payload, false_payload in payload_object["payload"]:
+        true_payload = true_payload.replace("[VALUE]", request_data["original_value"])
+        false_payload = false_payload.replace("[VALUE]", request_data["original_value"])
+        errors_before = len(injector.scan_errors)
+
+        true_response, true_dump = injector.run_payload_str(
+            request_data, true_payload
+        )
+        false_response, _ = injector.run_payload_str(
+            request_data, false_payload
+        )
+
+        if len(injector.scan_errors) != errors_before:
+            continue
+
+        comparison = {
+            "baseline": baseline,
+            "true_response": true_response,
+            "false_response": false_response,
+            "true_payload": true_payload,
+            "false_payload": false_payload,
+        }
+
+        yield [true_payload, false_payload], comparison, true_dump
 
 
 def json_to_pathtags(loaded_json):
@@ -147,19 +293,22 @@ def increasing_limit_check(responses, verification_list):
     return differencesum == len(responses) - 1
 
 
-def check_if_vulnerable(responses, verification_list, injector):
-    checks = {
-        "equivalence_check": equivalence_check,
-        "increasing_limit_check": increasing_limit_check,
-        "error_code_check": error_code_check
-    }
-    for verify_type in verification_list:
-        check = checks.get(verify_type, False)
-        if not check:
-            import os
-            print(f"\nWARNING: verify field '{verify_type}' not defined in {os.path.basename(__file__)}, defined checks are:\n{'\n'.join(checks.keys())}\n")
-            continue
-        if check(responses, verification_list):
-            return True
+def check_if_vulnerable(comparison, verification_list, injector):
+    models = comparison["baseline"]["dynamic_models"]
 
-    return False
+    true_text = remove_reflected_payload(
+        comparison["true_response"].text,
+        comparison["true_payload"],
+    )
+    false_text = remove_reflected_payload(
+        comparison["false_response"].text,
+        comparison["false_payload"],
+    )
+
+    if true_text == false_text:
+        return False
+
+    true_text = remove_dynamic_content(true_text, models)
+    false_text = remove_dynamic_content(false_text, models)
+
+    return true_text != false_text
