@@ -1,0 +1,17 @@
+{
+  "description": "Technology filter test",
+  "payloads": [
+    {
+      "payload": ["TEST_WINDOWS_LINUX"],
+      "verify": ["TEST_WINDOWS_LINUX"],
+      "type": "REGEX",
+      "technologies": ["windows", "linux"]
+    },
+    {
+      "payload": ["TEST_ANDROID"],
+      "verify": ["TEST_ANDROID"],
+      "type": "REGEX",
+      "technologies": ["android"]
+    }
+  ]
+}

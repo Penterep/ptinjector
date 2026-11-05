@@ -36,6 +36,21 @@ class RecordingInjector:
 
 
 class TimeVerifierTest(unittest.TestCase):
+
+    def test_delay_in_redirect_response_is_detected(self):
+        baseline = make_response(seconds=0.1)
+
+        payload_response = make_response(seconds=0.1)
+        payload_response.history = [
+            make_response(seconds=1.0, status_code=302),
+        ]
+
+        self.assertTrue(
+            TIME.pair_has_expected_delay(
+                baseline, payload_response, 1.0
+            )
+        )
+    
     def test_run_uses_a_fresh_control_before_each_negative_payload(self):
         injector = RecordingInjector([
             make_response(seconds=0.1),
@@ -131,6 +146,90 @@ class TimeVerifierTest(unittest.TestCase):
 
 
 class RegexVerifierTest(unittest.TestCase):
+    def test_run_reuses_original_response_across_payload_objects(self):
+        baseline = make_response(text="normal")
+        injector = RecordingInjector([make_response() for _ in range(3)])
+
+        injector.initial_response = baseline
+        injector.redirect_target_url = None
+        injector.send_original_request = MagicMock(return_value=baseline)
+        request_data = {"parameter": "q"}
+
+        results = list(REGEX.run(
+            {"payload": ["first", "second"]}, {}, request_data, injector,
+        ))
+        results.extend(REGEX.run(
+            {"payload": ["third"]}, {}, request_data, injector,
+        ))
+        injector.send_original_request.assert_not_called()
+        self.assertEqual(injector.payloads, ["first", "second", "third"])
+        self.assertEqual(len(results), 3)
+        self.assertTrue(all(responses[0] is baseline for _, responses, _ in results))
+
+
+    def test_run_detects_error_in_redirect_response(self):
+        baseline = make_response(text="normal")
+
+        redirect_response = make_response(
+            status_code=302,
+            text="SQL syntax error",
+            headers={"Location": "/final"},
+        )
+        final_response = make_response(text="normal")
+        final_response.history = [redirect_response]
+
+
+        injector = RecordingInjector([final_response])
+        injector.initial_response = baseline
+        injector.redirect_target_url = None
+
+        results = list(REGEX.run(
+            {"payload": ["'"]}, {}, {"parameter": "q"}, injector,
+        ))
+
+        self.assertEqual(len(results), 2)
+        self.assertEqual(injector.payloads, ["'"])
+
+        self.assertTrue(
+            REGEX.check_if_vulnerable(
+                results[0][1], ["SQL syntax"], injector
+            )
+        )
+
+        self.assertFalse(
+            REGEX.check_if_vulnerable(
+                results[1][1], ["SQL syntax"], injector
+            )
+        )
+
+    def test_run_reuses_initial_response_across_injection_points(self):
+
+        baseline = make_response(text="normal")
+
+        injector = RecordingInjector([
+            make_response(text="SQL syntax error"),
+            make_response(text="SQL syntax error"),
+        ])
+        injector.initial_response = baseline
+        injector.redirect_target_url = None
+        injector.send_original_request = MagicMock()
+        
+        findings = []
+
+        for parameter in ("first", "second"):
+            results = list(REGEX.run(
+                {"payload": ["'"]}, {}, {"parameter": parameter}, injector,
+            ))
+            _, responses, _ = results[0]
+            self.assertIs(responses[0], baseline)
+            findings.append(REGEX.check_if_vulnerable(
+                results[0][1], ["SQL syntax"], injector,
+            ))
+
+        injector.send_original_request.assert_not_called()
+        self.assertEqual(injector.payloads, ["'", "'"])
+        self.assertEqual(findings, [True, True])
+
     def test_new_pattern_after_payload_is_vulnerable(self):
         responses = [make_response(text="normal"), make_response(text="SQL syntax error")]
         self.assertTrue(REGEX.check_if_vulnerable(responses, ["SQL syntax"], None))
@@ -145,12 +244,63 @@ class RegexVerifierTest(unittest.TestCase):
 
 
 class HeaderVerifierTest(unittest.TestCase):
+    def test_run_detects_header_in_redirect_response(self):
+
+        baseline = make_response(headers={})
+
+        redirect_response = make_response(
+            status_code=302,
+            headers={"Location": "/final", "TH1234": "injected"}
+            
+        ) 
+
+        final_response = make_response(headers={})
+        final_response.history = [redirect_response]
+
+
+        injector = RecordingInjector([baseline, final_response])
+        payload = "foo%0D%0ATH1234:test"
+
+        results = list(HEADER.run(
+            {"payload": [payload]}, {}, {"parameter": "q"}, injector,
+        ))
+
+        self.assertEqual(len(results), 2)
+        self.assertEqual(
+            injector.payloads,
+            [injector.RANDOM_STRING, payload],
+        )
+
+        self.assertTrue(
+            HEADER.check_if_vulnerable(
+                results[0][1], ["TH1234"], injector
+            )
+        )
+
+        self.assertFalse(
+            HEADER.check_if_vulnerable(
+                results[1][1], ["TH1234"], injector
+            )
+        )
+
     def test_new_expected_header_is_vulnerable(self):
         responses = [
             make_response(headers={"Server": "test"}),
             make_response(headers={"Server": "test", "TH1234": "injected"}),
         ]
         self.assertTrue(HEADER.check_if_vulnerable(responses, ["TH1234"], None))
+
+    def test_header_present_in_baseline_history_is_rejected(self):
+        baseline_redirect = make_response(
+            status_code=302,
+            headers={"Foo": "old"},
+        )
+        baseline = make_response(headers={})
+        baseline.history = [baseline_redirect]
+
+        payload_response = make_response(headers={"Foo": "new"})
+        responses = [baseline, payload_response]
+        self.assertFalse(HEADER.check_if_vulnerable(responses, ["foo"], None))
 
     def test_header_present_in_baseline_is_rejected(self):
         responses = [
@@ -199,49 +349,53 @@ class HostHeaderVerifierTest(unittest.TestCase):
                 }
 
         list(HOST_HEADER.run({"payload": ["example.com"]}, {}, request_data, Injector()))
+        self.assertEqual(len(calls), 2) 
 
         self.assertEqual(request_data["headers"], {"Original": "value"})
         self.assertEqual(calls[0], ("1234567890", {"Original": "value"}))
         self.assertEqual(calls[1][1]["Host"], "example.com")
 
 
-class HtmlTagVerifierTest(unittest.TestCase):
-    def test_new_expected_tag_is_vulnerable(self):
-        responses = [
-            make_response(text="<html><body>normal</body></html>"),
-            make_response(text="<html><body><foo>injected</foo></body></html>"),
+class XssVerifierTest(unittest.TestCase):
+    def test_markup_detection(self):
+        marker = "foo1234567890"
+        cases = [
+            (HTML_TAG, f"<{marker}>test</{marker}>", True),
+            (HTML_TAG, "<foo>existing</foo>", False),
+            (HTML_TAG, f"&lt;{marker}&gt;test", False),
+            (HTML_TAG, f"<!-- <{marker}>test</{marker}> -->", False),
+            (HTML_ATTR, f'<div {marker}="test"></div>', True),
+            (HTML_ATTR, '<div foo="existing"></div>', False),
+            (HTML_ATTR, f'<div title="{marker}"></div>', False),
+            (HTML_ATTR, f'<!-- <div {marker}="test"></div> -->', False),
         ]
-        self.assertTrue(HTML_TAG.check_if_vulnerable(responses, ["foo"], None))
 
-    def test_tag_present_in_baseline_without_new_instance_is_rejected(self):
-        responses = [
-            make_response(text="<foo>existing</foo>"),
-            make_response(text="<foo>existing</foo>"),
-        ]
-        self.assertFalse(HTML_TAG.check_if_vulnerable(responses, ["foo"], None))
+        for module, html, expected in cases:
+            with self.subTest(module=module.__name__, html=html):
+                result = module.check_if_vulnerable(
+                    [make_response(text=html)], [marker], None
+                )
+                self.assertEqual(result, expected)
 
-    def test_additional_expected_tag_is_vulnerable(self):
-        responses = [
-            make_response(text="<foo>existing</foo>"),
-            make_response(text="<foo>existing</foo><foo>injected</foo>"),
-        ]
-        self.assertTrue(HTML_TAG.check_if_vulnerable(responses, ["foo"], None))
+    def test_modules_send_only_defined_payloads(self):
+        for module in (HTML_TAG, HTML_ATTR):
+            with self.subTest(module=module.__name__):
+                injector = RecordingInjector([
+                    make_response(),
+                    make_response(),
+                ])
 
+                results = list(module.run(
+                    {"payload": ["first", "second"]},
+                    {},
+                    {},
+                    injector,
+                ))
 
-class HtmlAttributeVerifierTest(unittest.TestCase):
-    def test_new_expected_attribute_is_vulnerable(self):
-        responses = [
-            make_response(text="<div>normal</div>"),
-            make_response(text="<div foo='injected'>payload</div>"),
-        ]
-        self.assertTrue(HTML_ATTR.check_if_vulnerable(responses, ["foo"], None))
-
-    def test_attribute_present_in_baseline_without_new_instance_is_rejected(self):
-        responses = [
-            make_response(text="<div foo='existing'></div>"),
-            make_response(text="<div foo='changed'></div>"),
-        ]
-        self.assertFalse(HTML_ATTR.check_if_vulnerable(responses, ["foo"], None))
+                self.assertEqual(injector.payloads, ["first", "second"])
+                self.assertTrue(
+                    all(len(responses) == 1 for _, responses, _ in results)
+                )
 
 
 class RedirectVerifierTest(unittest.TestCase):
@@ -566,8 +720,12 @@ class ErrorHandlingTest(unittest.TestCase):
         injector.use_json = True
         injector.ptjsonlib = ptjsonlib.PtJsonLib()
         injector.scan_errors = []
-        injector.consecutive_request_errors = 0
+
         injector.abort_scan = False
+        injector.consecutive_request_errors = 0
+        injector.send_initial_request = MagicMock(return_value=make_response())
+        injector.prepare_initial_redirect = MagicMock()
+
         return injector
 
     def test_three_consecutive_request_errors_trigger_circuit_breaker(self):

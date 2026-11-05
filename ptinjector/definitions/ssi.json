@@ -34,7 +34,7 @@
                 "2"
             ],
             "type": "TIME",
-            "tags": ["unix", "linux"]
+            "technologies": ["unix", "linux"]
         },
         {
             "payload": [
@@ -45,7 +45,7 @@
                 "2"
             ],
             "type": "TIME",
-            "tags": ["windows"]
+            "technologies": ["windows"]
         },
         {
             "payload": [

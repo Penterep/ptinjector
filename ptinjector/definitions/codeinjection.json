@@ -23,7 +23,7 @@
                 "PHP Version => \\d+\\.\\d+\\.\\d+[\\W\\w]+/etc/php", "[RANDOM_5][RANDOM_5]",
                 "(uid=\\d{4}\\(\\w+\\) gid=\\d{4}\\(\\w+\\).*)+"
             ],
-            "tags": ["php"],
+            "technologies": ["php"],
             "type": "REGEX"
         },
         {
@@ -37,7 +37,7 @@
                 "(uid=\\d{4}\\(\\w+\\) gid=\\d{4}\\(\\w+\\).*)+",
                 "[RANDOM_5][RANDOM_5]"
             ],
-            "tags": ["python"],
+            "technologies": ["python"],
             "type": "REGEX"
         },
         {
@@ -52,7 +52,7 @@
                 "(uid=\\d{4}\\(\\w+\\) gid=\\d{4}\\(\\w+\\).*)+",
                 "[RANDOM_5][RANDOM_5]"
             ],
-            "tags": ["perl"],
+            "technologies": ["perl"],
             "type": "REGEX"
         }
     ]

@@ -15,10 +15,11 @@
     You should have received a copy of the GNU General Public License
     along with ptinjector.  If not, see <https://www.gnu.org/licenses/>.
 """
-
+from ptinjector.response_utils import get_response_chain
 import argparse
 import atexit
 import base64
+from urllib.parse import urljoin, urlsplit
 import random
 import re
 import os
@@ -32,12 +33,13 @@ import importlib
 import requests
 from bs4 import BeautifulSoup
 from ptlibs import ptprinthelper, ptmisclib, ptjsonlib, ptnethelper, ptcharsethelper
-from ptlibs.parsers.http_request_parser import HttpRequestParser
+from request_parser import InjectionRequestParser
 
 from _version import __version__
 from definitions._loader import DefinitionsLoader
 
 MAX_CONSECUTIVE_REQUEST_ERRORS = 3
+INJECTION_MARKER = "{{*}}"
 
 def headers_cookies_prepare(args):
     headers_dict = dict()
@@ -60,12 +62,26 @@ def headers_cookies_prepare(args):
     return headers_dict
 
 
+
+
 def header_pair(value):
     """Validate a header while allowing colons in its value."""
     header_name, separator, _ = value.partition(":")
     if not separator or not header_name.strip():
         raise argparse.ArgumentTypeError("Header must use the 'Name: Value' format")
     return value
+def normalize_cli_markers(value, input_marker):
+    if value is None: 
+        return None
+
+    parts = value.split(INJECTION_MARKER)
+    result = []
+
+    for part in parts:
+        changed_part = part.replace(input_marker, INJECTION_MARKER)
+        result.append(changed_part)
+        
+    return INJECTION_MARKER.join(result) 
 
 
 def read_request_input(value):
@@ -88,6 +104,79 @@ def read_request_input(value):
 
     return original_http_request
 
+def get_redirect_target(original_url, response):
+    redirect_codes = {301,302, 303, 307, 308}
+
+    if response.status_code not in redirect_codes:
+        return None
+
+    location = response.headers.get("Location")
+
+    if not location:
+        return None
+
+    target_url = urljoin(original_url, location)
+
+    return target_url
+
+def is_allowed_redirect(original_url, target_url):
+    if not target_url: 
+        return False
+
+    default_ports={"http": 80, "https": 443}
+
+
+    try: 
+        old = urlsplit(original_url)
+        new = urlsplit(target_url)
+
+        old_port = old.port
+        new_port = new.port
+    except ValueError:
+        return False 
+
+    if old.scheme not in default_ports or new.scheme not in default_ports:
+        return False
+
+
+    if not old.hostname or old.hostname != new.hostname:
+        return False
+
+    if (old.username, old.password) != (new.username, new.password):
+        return False
+
+    if old.query != new.query or old.fragment != new.fragment:
+        return False
+
+    https_upgrade = old.scheme == "http" and new.scheme == "https"
+
+    if old.scheme != new.scheme and not https_upgrade:
+        return False
+
+    if old_port is None:
+        old_port = default_ports[old.scheme]
+
+    if new_port is None:
+        new_port = default_ports[new.scheme]
+
+    standard_upgrade = https_upgrade and old_port == 80 and new_port == 443
+
+    if old_port != new_port and not standard_upgrade:
+        return False
+
+    old_path = old.path or "/"
+    new_path = new.path or "/"
+
+    slash_added = not old_path.endswith("/") and new_path == old_path + "/"
+
+    if old_path != new_path and not slash_added:
+        return False
+
+    return https_upgrade or slash_added
+
+
+
+
 class PtInjector:
     def __init__(self, args):
         self.ptjsonlib: object                              = ptjsonlib.PtJsonLib()
@@ -106,10 +195,14 @@ class PtInjector:
         self.PLACEHOLDER_EXISTS: bool                       = self.check_if_placeholder_exists(args)
         self.URL_PLACEHOLDER_INDEX: int                     = -1
         self.LOADED_DEFINITIONS: dict                       = self.load_definitions(args, random_string=self.RANDOM_STRING)
-        self.request_parser: object                         = HttpRequestParser(ptjsonlib=self.ptjsonlib, use_json=self.use_json, placeholder=self.PLACEHOLDER_SYMBOL)
+        self.request_parser: object                         = InjectionRequestParser(ptjsonlib=self.ptjsonlib, use_json=self.use_json, placeholder=self.PLACEHOLDER_SYMBOL)
         self.args                                                      = args
         self.modules                                               = self.load_modules(os.path.join(os.path.dirname(__file__), 'modules'))
         self.timeout = args.timeout
+        self.initial_request_attempted = False
+        self.initial_response = None
+        self.initial_url = None
+        self.redirect_target_url = None
 
     def load_modules(self, path: str):
         "loads from path, modules for testing different vulnerabilities, each should implement run() and check_if_vulnerable(), otherwise the defaults are used"
@@ -140,16 +233,146 @@ class PtInjector:
         self.consecutive_request_errors = 0
         return result
 
+
+    def build_initial_request(self, args):
+        if args.request_file:
+            raw_request = args.request_text
+            scheme = "http"
+        else:
+            parsed_url = urlsplit(args.url)
+            scheme = parsed_url.scheme
+
+            request_url = parsed_url._replace(
+                path=parsed_url.path or "/"
+            ).geturl()
+
+            raw_request = self.request_parser.build_request(
+                url=request_url,
+                headers=self.http_headers.copy(),
+                request_data=args.data,
+            )
+
+        original_request = raw_request.replace(
+            self.PLACEHOLDER_SYMBOL, ""
+        )
+
+        return self.request_parser.parse_http_request(
+            http_request=original_request,
+            scheme=scheme,
+        )
+
+    def send_initial_request(self, args):
+        if self.initial_request_attempted:
+            return self.initial_response
+
+        url, method, headers, data = self.build_initial_request(args)
+
+        self.initial_url = url
+        self.initial_request_attempted = True
+
+        try:
+            response, _ = ptmisclib.load_url_from_web_or_temp(
+                url,
+                method=method,
+                headers=headers,
+                data=data,
+                proxies=self.proxy,
+                timeout=self.timeout,
+                redirects=False,
+                verify=False,
+                cache=False,
+                max_retries=0,
+                dump_response=True,
+            )
+        except requests.exceptions.RequestException as error:
+            self.record_request_error(
+                error,
+                context="initial target request",
+            )
+            self.abort_scan = True
+            return None
+
+        self.initial_response = response
+        self.initial_url = response.url or url
+        self.consecutive_request_errors = 0
+
+        return response
+
+    def prepare_initial_redirect(self):
+        if self.initial_response is None:
+            return 
+        try: 
+            target_url = get_redirect_target(
+                self.initial_url,
+                self.initial_response,
+            )
+        except ValueError:
+            return 
+
+        if not is_allowed_redirect(self.initial_url, target_url):
+            return 
+
+        self.redirect_target_url = target_url
+
+        ptprinthelper.ptprint(
+            f"Allowed redirect detected: {self.initial_url} -> {target_url}",
+            "WARNING",
+            condition=not self.use_json,
+            colortext=False,
+        )
+
+        self.ptjsonlib.add_properties({
+         "urlChange": {
+             "from": self.initial_url,
+             "to": target_url,
+         }
+     })
+    def apply_initial_redirect(self, url, headers):
+        if self.redirect_target_url is None:
+            return url, headers
+
+        original = urlsplit(self.initial_url)
+        target = urlsplit(self.redirect_target_url)
+        current = urlsplit(url)
+
+        path = current.path or "/"
+        original_path = original.path or "/"
+        target_path = target.path or "/"
+
+        if target_path == original_path + "/":
+            path += "/"
+
+        updated_url = current._replace(
+        scheme=target.scheme,
+        netloc=target.netloc,
+        path=path,
+        ).geturl()
+
+        updated_headers = headers.copy()
+
+        for name, value in headers.items():
+            if name.casefold() == "host":
+                if self.PLACEHOLDER_SYMBOL not in value:
+                    updated_headers[name] = target.netloc
+
+        return updated_url, updated_headers
+
+
     def send_original_request(self, request_data):
         scheme = request_data["url"].split("://", 1)[0]
 
-        url, http_method, headers, data = self.request_parser.parse_http_request(
-            http_request =request_data["original_http_request"],
-            scheme=scheme
-            )
+        url, method, headers, data = self.request_parser.parse_http_request(
+            http_request=request_data["original_http_request"],
+            scheme=scheme,
+        )
 
-        response,_ = ptmisclib.load_url_from_web_or_temp(url, method=http_method, headers=headers, data=data, redirects=False, proxies=self.proxy, verify=False, timeout=self.timeout, dump_response=True)
+        url, headers = self.apply_initial_redirect(url, headers)
 
+        response, _ = self._send_payload_request(
+            url, method, headers, data
+        )
+
+        self.consecutive_request_errors = 0
         return response
 
     def record_request_error(self, error, context, count_toward_abort=True):
@@ -216,8 +439,13 @@ class PtInjector:
 
     def run(self, args):
         """Main method"""
+        self.is_valid_request(args)
+        self.send_initial_request(args)
+        self.prepare_initial_redirect()
 
         for vulnerability_name, definition_contents in self.LOADED_DEFINITIONS.items():
+            if self.abort_scan:
+                break
             if not definition_contents.get("payloads", False):
                 vulnerability_description = definition_contents.get('description', vulnerability_name)
                 ptprinthelper.ptprint(f"No payloads available to test for {vulnerability_description} vulnerability" + bool(self.args.technology) * f" with chosen technology: {", ".join(self.args.technology)}", "WARNING", condition=not self.use_json, colortext=False, clear_to_eol=True)
@@ -249,17 +477,8 @@ class PtInjector:
 
                 payload_objects = definition_contents.get("payloads", [])
 
-                if vulnerability_name == "xss":
-                    try:
-                        request_data["baseline_response"] = self.send_original_request(request_data) 
-                        self.consecutive_request_errors=0
-                    except requests.exceptions.RequestException as error:
-                        self.record_request_error(
-                            error,
-                            context=f"XSS control request on parameter {parameter}"
-                        )
-                        parameter_incomplete = True
-                        payload_objects = []
+
+           
 
                 for payload_object in payload_objects:
                     errors_before_payload = len(self.scan_errors)
@@ -310,6 +529,42 @@ class PtInjector:
 
         return not self.scan_errors
 
+    def _send_payload_request(self, url, method, headers, data):
+        received_responses = []
+
+        def remember_response(response, *args, **kwargs):
+            received_responses.append(response)
+
+        try: 
+            return ptmisclib.load_url_from_web_or_temp(
+                url,
+                method=method,
+                headers=headers,
+                data=data,
+                proxies=self.proxy,
+                timeout=self.timeout,
+                redirects=True,
+                verify=False,
+                cache=False,
+                max_retries=0,
+                dump_response=True,
+                hooks={"response": remember_response},
+            )
+        except requests.exceptions.RequestException as error:
+            if not received_responses:
+                raise
+
+            self.record_request_error(
+                error, 
+                context="following payload redirects",
+                count_toward_abort=False   
+            )
+
+            last_response = received_responses[-1]
+            last_response.history = received_responses[:-1]
+
+            return last_response, ptmisclib.get_response_data_dump(last_response)
+
     def _send_payload(self, payload: str, rdata=None) -> requests.models.Response:
         """Send <payload> to <url>"""
         #if self.args.verbose:
@@ -333,12 +588,14 @@ class PtInjector:
         if URL_PLACEHOLDER_INDEX != -1:
             # Payload marker is in <url>
             url = url[:URL_PLACEHOLDER_INDEX] + payload + url[URL_PLACEHOLDER_INDEX + len(self.PLACEHOLDER_SYMBOL):]  # Substitute payload marker with actual payload
-            response, dump = ptmisclib.load_url_from_web_or_temp(url, method=http_method, headers=headers, data=data, redirects=False, proxies=self.proxy, verify=False, timeout=self.timeout, dump_response=True)
-            return response, dump
+            return self._send_payload_request(url, http_method, headers, data) 
+
         else:
             # Payload  marker is in <request data>
             request_data = data.replace(self.PLACEHOLDER_SYMBOL, payload)
-            return ptmisclib.load_url_from_web_or_temp(url, method=http_method, headers=headers, proxies=self.proxy, data=request_data, redirects=False, verify=False, timeout=self.timeout, dump_response=True)
+            return self._send_payload_request(
+                url, http_method, headers, request_data
+            )
 
         # TODO: Header injection: attack_data = self.payload2dict(self.str2dict(), payload)
 
@@ -395,14 +652,10 @@ class PtInjector:
         for value in values:
             placeholder_count += value.count(self.PLACEHOLDER_SYMBOL)
 
-        if placeholder_count > 1:
-            self.ptjsonlib.end_error(
-                f"Only one occurrence of placeholder "
-                f"'{self.PLACEHOLDER_SYMBOL}' is allowed, found {placeholder_count}",
-                self.use_json,
-            )
+        if placeholder_count >= 1:
+            return True
 
-        return placeholder_count == 1
+        return False
 
     def get_local_ip(self):
         try:
@@ -551,7 +804,6 @@ class PtInjector:
             parsed_url = urllib.parse.urlparse(args.url)
             if (
                 not self.PLACEHOLDER_EXISTS
-                and (not parsed_url.path or parsed_url.path == "/")
                 and not parsed_url.query
                 and not args.data
             ):
@@ -581,7 +833,7 @@ class PtInjector:
 
             if args.request_file:
 
-                original_http_request = args.request_text
+                original_http_request = args.request_text.replace(self.PLACEHOLDER_SYMBOL, "")
                 http_request = self.request_parser.mark_placeholder(
                     http_request=original_http_request,
                     parameter=parameter
@@ -592,24 +844,51 @@ class PtInjector:
                 http_request = self.request_parser.build_request(url=request_url, headers=self.http_headers, request_data=args.data)
 
 
-                original_http_request = http_request
+                original_http_request = http_request.replace(self.PLACEHOLDER_SYMBOL, "")
 
-                http_request = self.request_parser.mark_placeholder(http_request=http_request, parameter=parameter)
+                http_request = self.request_parser.mark_placeholder(http_request=original_http_request, parameter=parameter)
             return http_request, original_http_request
 
-        def parse_and_yield_request(parameter_name, http_request, original_http_request):
-            """Parses the HTTP request and yields a dictionary with request data components."""
-            scheme = self.args.url.split("://")[0] if self.args.url else "http"
-            url, method, headers, request_data = self.request_parser.parse_http_request(http_request=http_request, scheme=scheme)
-            yield {"parameter": parameter_name, "url": url, "method": method, "headers": headers, "data": request_data, "original_http_request":original_http_request}
+        def parse_and_yield_request(
+            parameter_name, http_request, original_http_request, parameter_selector=None
+        ):
+            original_value = ""
+            if parameter_selector is not None:
+                value = self.request_parser.get_parameter_value(
+                    original_http_request, parameter_selector
+                )
+                restored_request = self.request_parser._update_parameter_value(
+                    original_http_request, parameter_selector, str(value)
+                )
 
+                prefix, suffix = http_request.split(self.PLACEHOLDER_SYMBOL, 1)
+                if (
+                    not restored_request.startswith(prefix)
+                    or not restored_request.endswith(suffix)
+                ):
+                    raise ValueError("Cannot recover original parameter value")
+
+                end = len(restored_request) - len(suffix)
+                original_value = restored_request[len(prefix):end]
+
+            scheme = self.args.url.split("://")[0] if self.args.url else "http"
+            url, method, headers, request_data = self.request_parser.parse_http_request(
+                http_request=http_request, scheme=scheme
+            )
+            url, headers = self.apply_initial_redirect(url, headers)
+
+            yield {
+                "parameter": parameter_name,
+                "url": url,
+                "method": method,
+                "headers": headers,
+                "data": request_data,
+                "original_http_request": original_http_request,
+                "original_value": original_value,
+            }
 
         if self.PLACEHOLDER_EXISTS:
-            if args.parameter:
-                self.ptjsonlib.end_error(
-                    "Cannot combine --parameter and a manual injection marker.",
-                    self.use_json,
-                )
+                
 
             if args.request_file:
                 http_request = args.request_text
@@ -620,15 +899,26 @@ class PtInjector:
                     request_data=args.data,
                 )
 
+            parts = http_request.split(self.PLACEHOLDER_SYMBOL)
+            places_to_inject = []
+
+            for i in range(len(parts) - 1):
+
+                parts = http_request.split(self.PLACEHOLDER_SYMBOL)
+                parts[i] = parts[i].replace(parts[i], parts[i] + self.PLACEHOLDER_SYMBOL)
+                parts = "".join(parts)
+                places_to_inject.append(parts)
+
             original_http_request = http_request.replace(
-                self.PLACEHOLDER_SYMBOL, ""
+            self.PLACEHOLDER_SYMBOL, ""
             )
 
-            yield from parse_and_yield_request(
-                "placeholder", http_request, original_http_request
-            )
+            for i, place_to_inject in enumerate(places_to_inject):                    
+                yield from parse_and_yield_request(f"#{i + 1}",place_to_inject, original_http_request)
 
-            return
+            if not args.parameter:
+                return
+            
 
 
 
@@ -637,7 +927,7 @@ class PtInjector:
             # Single parameter case
 
             http_request, original_http_request = build_and_mark_request(args.parameter)
-            yield from parse_and_yield_request(args.parameter, http_request, original_http_request)
+            yield from parse_and_yield_request(args.parameter, http_request, original_http_request, parameter_selector=args.parameter)
         else:
             # Multiple parameters case
             parameter_index = 0
@@ -646,7 +936,12 @@ class PtInjector:
 
                     http_request, original_http_request = build_and_mark_request(parameter_index)
                     parameter_name = self.request_parser.get_parameter_name_by_index(http_request, parameter_index)
-                    yield from parse_and_yield_request(parameter_name, http_request, original_http_request)
+                    yield from parse_and_yield_request(
+                        parameter_name,
+                        http_request,
+                        original_http_request,
+                        parameter_selector=parameter_index,
+                    )
                     parameter_index += 1
                 except IndexError:
                     break  # Konec při dosažení posledního parametru
@@ -694,7 +989,7 @@ def parse_args() -> argparse.Namespace:
     exclusive = parser.add_mutually_exclusive_group(required=True)
     exclusive.add_argument("-u",  "--url",              type=str)
     exclusive.add_argument("-rf", "--request-file",     type=str)
-    parser.add_argument("-ts",  "--tests",               type=str,  nargs="+")
+    parser.add_argument("-ts",  "--tests",               type=str.lower,  nargs="+")
     parser.add_argument("-g",  "--technology",          type=str,  nargs="+", default=set())
     parser.add_argument("-a",  "--user-agent", "--agent", "--user_agent", dest="user_agent", type=str)
     parser.add_argument(
@@ -717,6 +1012,31 @@ def parse_args() -> argparse.Namespace:
     args = parser.parse_args()
     if args.timeout <= 0:
         parser.error("--timeout must be greater than zero")
+
+    input_marker = args.placeholder
+
+    if not input_marker:
+        parser.error("--placeholder must not be emty")
+
+    if not args.request_file:
+        args.url = normalize_cli_markers(args.url, input_marker )
+        args.data = normalize_cli_markers(args.data, input_marker )
+        args.user_agent = normalize_cli_markers(args.user_agent, input_marker )
+
+        if args.cookie:
+            for groups in args.cookie:
+                for i, group in enumerate(groups):
+                    groups[i] = normalize_cli_markers(group, input_marker)
+
+        if args.headers:
+            for groups in args.headers:
+                for i, group in enumerate(groups):
+                    groups[i] = normalize_cli_markers(group, input_marker)
+
+    
+    
+    args.placeholder = INJECTION_MARKER
+
 
     args.request_text = None
 
@@ -743,8 +1063,12 @@ class DefaultVulnerability:
     @staticmethod
     def run(payload_object, definition_contents, request_data, injector: PtInjector):
         for payload_str in payload_object["payload"]:
-            response, dump = injector.run_payload_str(request_data, payload_str)
-            yield [payload_str], [response], dump
+            response, _ = injector.run_payload_str(request_data, payload_str)
+
+            for current_response in get_response_chain(response):
+                dump = ptmisclib.get_response_data_dump(current_response)
+
+                yield [payload_str], [current_response], dump
 
     @staticmethod
     def check_if_vulnerable(responses, verification_list, injector: PtInjector):

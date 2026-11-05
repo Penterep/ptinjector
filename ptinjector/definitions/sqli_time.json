@@ -66,7 +66,8 @@
                 7
             ],
             "type": "time",
-            "tags":["mariadb", "mysql", "payload_template"],
+            "technologies":["mariadb", "mysql"],
+            "tags": ["payload_template"],
             "vars":{
                 "QUOTE": ["'"],
                 "OP": ["and", "AND", "OR", "or"],
@@ -81,7 +82,8 @@
                 7
             ],
             "type": "time",
-            "tags": ["microsoftsql", "payload_template"],
+            "technologies": ["microsoftsql"],
+            "tags":["payload_template"],
             "vars":{
                 "start": ["", "'"],
                 "QUOTE": ["'"],
@@ -97,7 +99,8 @@
                 7
             ],
             "type": "time",
-            "tags": ["postgresql", "payload_template"],
+            "technologies": ["postgresql"],
+            "tags": ["payload_template"],
             "vars":{
                 "OP": ["and","or", "OR", "AND"],
                 "end": ["%23", "#", "--+-", ";%00", "%00"],
