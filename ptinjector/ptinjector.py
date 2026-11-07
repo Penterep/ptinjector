@@ -792,6 +792,8 @@ class PtInjector:
         """
 
         if args.request_file:
+
+
             http_request = self.request_parser.is_valid_http_request(args.request_text)
             _req_data = self.request_parser.get_request_data(http_request)
             if (
@@ -933,14 +935,25 @@ class PtInjector:
             parameter_index = 0
             while True:
                 try:
-
-                    http_request, original_http_request = build_and_mark_request(parameter_index)
-                    parameter_name = self.request_parser.get_parameter_name_by_index(http_request, parameter_index)
+                    if args.request_file:
+                        original_http_request = args.request_text.replace(
+                            self.PLACEHOLDER_SYMBOL,
+                            "",
+                        )
+                    else:
+                        original_http_request = self.request_parser.build_request(
+                            url=request_url,
+                            headers= self.http_headers.copy(),
+                            request_data=args.data,
+                        )
+                    parameter_name = self.request_parser.get_parameter_name_by_index(original_http_request, parameter_index)
+                    http_request, original_http_request = build_and_mark_request(parameter_name)
+                    
                     yield from parse_and_yield_request(
                         parameter_name,
                         http_request,
                         original_http_request,
-                        parameter_selector=parameter_index,
+                        parameter_selector=parameter_name,
                     )
                     parameter_index += 1
                 except IndexError:
