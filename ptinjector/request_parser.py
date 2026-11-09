@@ -92,6 +92,15 @@ class InjectionRequestParser(HttpRequestParser):
         if content_type in ("application/xml", "text/xml"):
             return ET.tostring(post_parameters, encoding="unicode")
 
+        if content_type == "multipart/form-data":
+            raw_message = post_parameters.as_bytes()
+            separator = b"\r\n\r\n"
+
+            if separator not in raw_message:
+                separator = b"\n\n"
+
+            return raw_message.split(separator, 1)[1].decode("utf-8")
+
         return super()._reconstruct_post_data(
             post_parameters,
             content_type,
@@ -163,15 +172,38 @@ class InjectionRequestParser(HttpRequestParser):
 
         return paths
 
+
+    @staticmethod
+    def get_all_multipart_parameter_names(message):
+        names = []
+
+        for part in message.iter_parts():
+            if part.get_content_disposition() != "form-data":
+                continue
+
+            name = part.get_param("name", header = "content-disposition")
+
+            if name is not None and name not in names:
+                names.append(name)
+
+        return names
+
     @staticmethod
     def get_all_xml_paths(element, prefix=""):
         path = f"{prefix}.{element.tag}" if prefix else element.tag
         paths = [path]
+        seen_tags = set()
 
         for child in element:
+
+            if child.tag in seen_tags:
+                continue
+
+            seen_tags.add(child.tag)
             paths.extend(
                 InjectionRequestParser.get_all_xml_paths(child, path)
             )
+            
         return paths
     
     @staticmethod
@@ -208,11 +240,31 @@ class InjectionRequestParser(HttpRequestParser):
             parameter,
             data,
         )
+        for child in list(element):
+            element.remove(child)
         element.text = new_value
         return data
 
             
 
+    @staticmethod
+    def replace_multipart_value(message, parameter, new_value):
+
+        if not parameter:
+            raise IndexError(f"Could not find parameter path: {parameter}")
+
+        for part in message.iter_parts():
+            name = part.get_param(
+                "name",
+                header="content-disposition",
+            )
+            if name == parameter:
+                part.set_payload(new_value)
+                return message
+
+        raise IndexError(
+            f"Could not find multipart parameter: {parameter}"
+        )
 
 
 
@@ -292,7 +344,13 @@ class InjectionRequestParser(HttpRequestParser):
             )
 
         elif content_type == "multipart/form-data":
-            return
+
+            self.replace_multipart_value(
+                post_parameters,
+                parameter,
+                new_value,
+            )
+
 
         elif content_type in ("application/x-www-form-urlencoded", ""):
             if isinstance(parameter, int):
@@ -364,6 +422,18 @@ class InjectionRequestParser(HttpRequestParser):
 
             raise IndexError("Parameter index out of bounds")
 
+        if content_type_normalized == "multipart/form-data":
+            names = self.get_all_multipart_parameter_names(
+                post_parameters_dict
+            )
+
+            post_parameter_index = parameter_index - len(get_parameters_list)
+
+            if 0 <= post_parameter_index < len(names):
+                return names[post_parameter_index]
+
+            raise IndexError("Parameter index out of bounds")
+
         if parameter_index < len(get_parameters_list):
             key, _ = get_parameters_list[parameter_index]
             return key
@@ -396,6 +466,18 @@ class InjectionRequestParser(HttpRequestParser):
                 post_parameters,
             )
             return element.text or ""
+
+        if content_type_normalized == "multipart/form-data":
+            for part in post_parameters.iter_parts():
+                name = part.get_param(
+                    "name",
+                    header="content-disposition",
+                )
+
+                if name == parameter:
+                    return part.get_content()
+
+            raise ValueError(f"Parameter {parameter!r} not found ")
 
         if "." in parameter:
 
