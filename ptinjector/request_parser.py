@@ -90,7 +90,11 @@ class InjectionRequestParser(HttpRequestParser):
     def _reconstruct_post_data(self, post_parameters, content_type):
         content_type = (content_type or "").split(";", 1)[0].strip().lower()
         if content_type in ("application/xml", "text/xml"):
-            return ET.tostring(post_parameters, encoding="unicode")
+            return ET.tostring(
+                post_parameters,
+                encoding="unicode",
+                short_empty_elements=False,
+            )
 
         if content_type == "multipart/form-data":
             raw_message = post_parameters.as_bytes()
@@ -152,20 +156,28 @@ class InjectionRequestParser(HttpRequestParser):
         return paths
 
     @staticmethod
-    def get_all_json_paths(data: dict, prefix: str = "") -> list:
+    def get_all_json_paths(data: dict | list, prefix: str = "") -> list:
+        while isinstance(data, list):
+            if not data:
+                return []
+            data = data[0]
+
+        if not isinstance(data, dict):
+            return []
+
         paths = []
 
         for key, value in data.items():
             while isinstance(value, list):
                 if not value:
-                    raise ValueError(f"Parameter path not found {value}")
+                    break
                 value = value[0]
 
             path = f"{prefix}.{key}" if prefix else key
             paths.append(path)
 
 
-            if isinstance(value, dict):
+            if value and isinstance(value, dict):
                 paths.extend(
                     InjectionRequestParser.get_all_json_paths(value, path)
                 )
@@ -259,7 +271,8 @@ class InjectionRequestParser(HttpRequestParser):
                 header="content-disposition",
             )
             if name == parameter:
-                part.set_payload(new_value)
+                encoding = part.get_content_charset() or "utf-8"
+                part.set_payload(new_value.encode(encoding))
                 return message
 
         raise IndexError(
@@ -327,6 +340,37 @@ class InjectionRequestParser(HttpRequestParser):
         # Parse URL and parameters
         parsed_url = urllib.parse.urlparse(request_url)
         get_parameters_list: list = urllib.parse.parse_qsl(parsed_url.query, keep_blank_values=True)
+
+        query_index = None
+
+        if isinstance(parameter, int):
+            if 0 <= parameter < len(get_parameters_list):
+                query_index = parameter
+        else:
+            for index, (name, value) in enumerate(get_parameters_list):
+                if name == parameter:
+                    query_index = index
+
+        if query_index is not None:
+            name, value = get_parameters_list[query_index]
+            get_parameters_list[query_index] = (name, new_value)
+
+            updated_query = urllib.parse.urlencode(
+                get_parameters_list, safe=self.placeholder
+            )
+            query_string = f"?{updated_query}" if updated_query else ""
+
+            header_lines = "\n".join(
+                f"{name}: {value}" for name, value in request_headers.items()
+            )
+
+            return (
+                f"{request_method} {parsed_url.path}{query_string} {self.HTTP_VERSION}\n"
+                + header_lines
+                + "\n\n"
+                + request_data
+            )
+
         post_parameters = self._parse_post_data(request_data, content_type)
         # Update parameters
         original_content_type = content_type
@@ -403,6 +447,8 @@ class InjectionRequestParser(HttpRequestParser):
 
         parsed_url = urllib.parse.urlparse(url)
         get_parameters_list: list = urllib.parse.parse_qsl(parsed_url.query, keep_blank_values = True)
+        if parameter_index < len(get_parameters_list):
+            return get_parameters_list[parameter_index][0]
         post_parameters_dict: dict = self._parse_post_data(request_data, content_type)
 
         if content_type_normalized == "application/json":
@@ -434,10 +480,9 @@ class InjectionRequestParser(HttpRequestParser):
 
             raise IndexError("Parameter index out of bounds")
 
-        if parameter_index < len(get_parameters_list):
-            key, _ = get_parameters_list[parameter_index]
-            return key
-        elif parameter_index < len(post_parameters_dict) + len(get_parameters_list):
+
+
+        if parameter_index < len(post_parameters_dict) + len(get_parameters_list):
             key = list(post_parameters_dict.keys())[parameter_index - len(get_parameters_list)]
             return key
         else:
@@ -456,6 +501,19 @@ class InjectionRequestParser(HttpRequestParser):
         get_parameters = urllib.parse.parse_qsl(
             query, keep_blank_values=True
         )
+
+        if isinstance(parameter, str) and parameter.isdigit():
+            parameter = int(parameter)
+
+        if isinstance(parameter, int):
+            if 0 <= parameter < len(get_parameters):
+                return get_parameters[parameter][1]
+        else:
+                query_parameters = dict(get_parameters)
+            
+                if parameter in query_parameters:
+                    return query_parameters[parameter]
+
         content_type = self.get_content_type(headers)
         content_type_normalized = (content_type or "").split(";", 1)[0].strip().lower()
         post_parameters = self._parse_post_data(data, content_type)
@@ -475,11 +533,13 @@ class InjectionRequestParser(HttpRequestParser):
                 )
 
                 if name == parameter:
-                    return part.get_content()
+                    encoding = part.get_content_charset() or "utf-8"
+                    raw_value = part.get_payload(decode=True)
+                    return raw_value.decode(encoding)
 
             raise ValueError(f"Parameter {parameter!r} not found ")
 
-        if "." in parameter:
+        if isinstance(parameter, str) and "." in parameter :
 
             if content_type_normalized == "application/json"  :
                 
@@ -488,8 +548,7 @@ class InjectionRequestParser(HttpRequestParser):
                     parameter,
                     )
 
-        if isinstance(parameter, str) and parameter.isdigit():
-            parameter = int(parameter)
+
 
         if isinstance(parameter, int):
             parameters = get_parameters + list(post_parameters.items())
