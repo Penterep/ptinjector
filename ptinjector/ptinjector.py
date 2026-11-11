@@ -23,6 +23,7 @@ from urllib.parse import urljoin, urlsplit
 import random
 import re
 import os
+import json
 import sys; sys.path.append(__file__.rsplit("/", 1)[0])
 import subprocess
 import socket
@@ -592,7 +593,16 @@ class PtInjector:
 
         else:
             # Payload  marker is in <request data>
-            request_data = data.replace(self.PLACEHOLDER_SYMBOL, payload)
+            body_payload = payload 
+
+            content_type = self.request_parser.get_content_type(headers)
+            content_type = (content_type or "").split(";", 1)[0].strip().lower()
+
+            if content_type == "application/json":
+                body_payload = json.dumps(payload)[1:-1]
+
+            request_data = data.replace(self.PLACEHOLDER_SYMBOL, body_payload)
+
             return self._send_payload_request(
                 url, http_method, headers, request_data
             )
@@ -792,6 +802,8 @@ class PtInjector:
         """
 
         if args.request_file:
+
+
             http_request = self.request_parser.is_valid_http_request(args.request_text)
             _req_data = self.request_parser.get_request_data(http_request)
             if (
@@ -875,6 +887,22 @@ class PtInjector:
             url, method, headers, request_data = self.request_parser.parse_http_request(
                 http_request=http_request, scheme=scheme
             )
+
+
+            content_type = self.request_parser.get_content_type(headers)
+            content_type = (content_type or "").split(";", 1)[0].strip().lower()
+
+            if (
+                parameter_selector is not None
+                and content_type == "application/json"
+                and self.PLACEHOLDER_SYMBOL in request_data
+            ):
+                if isinstance(value, str):
+                    original_value = value
+                else:
+                    original_value = json.dumps(value)
+
+
             url, headers = self.apply_initial_redirect(url, headers)
 
             yield {
@@ -933,14 +961,25 @@ class PtInjector:
             parameter_index = 0
             while True:
                 try:
-
-                    http_request, original_http_request = build_and_mark_request(parameter_index)
-                    parameter_name = self.request_parser.get_parameter_name_by_index(http_request, parameter_index)
+                    if args.request_file:
+                        original_http_request = args.request_text.replace(
+                            self.PLACEHOLDER_SYMBOL,
+                            "",
+                        )
+                    else:
+                        original_http_request = self.request_parser.build_request(
+                            url=request_url,
+                            headers= self.http_headers.copy(),
+                            request_data=args.data,
+                        )
+                    parameter_name = self.request_parser.get_parameter_name_by_index(original_http_request, parameter_index)
+                    http_request, original_http_request = build_and_mark_request(parameter_name)
+                    
                     yield from parse_and_yield_request(
                         parameter_name,
                         http_request,
                         original_http_request,
-                        parameter_selector=parameter_index,
+                        parameter_selector=parameter_name,
                     )
                     parameter_index += 1
                 except IndexError:
