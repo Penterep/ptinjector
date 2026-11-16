@@ -1,0 +1,12 @@
+{
+    "satid": "",
+    "guid": "",
+    "status": "finished",
+    "message": "",
+    "results": {
+        "log": "Testing for [Error-based SQL Injection] vulnerability\r\nTesting [service] parameter\r\nSend payloads:\r\n    '\r\n    \"\r\n    \\\r\n    foo\r\n    ' AND 1=to_number((SELECT user FROM dual))--\r\n    ' AND 1=CONVERT(int,(SELECT @@version))--\r\n    ' AND 1=CAST((SELECT SYSTEM_USER) AS int)--\r\n    '::int\r\n    '||(SELECT version())||'\r\n    ' AND updatexml(1,concat(0x7e,user(),0x7e),1)--\r\n    ' AND extractvalue(1,concat(0x7e,database(),0x7e))--",
+        "nodes": [],
+        "properties": {},
+        "vulnerabilities": []
+    }
+}

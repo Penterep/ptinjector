@@ -623,3 +623,22 @@ class InjectionRequestParser(HttpRequestParser):
             return post_parameters[parameter]
 
         raise ValueError(f"Parameter {parameter!r} not found")
+
+
+
+    def find_injected_span(text, template, placeholder):
+        if not placeholder or template.count(placeholder):
+            return None
+
+        prefix, suffix = template.split(placeholder, 1)
+
+        if not text.startswith(prefix):
+            return None
+
+        start = len(prefix)
+        end = len(text) - len(suffix) 
+
+        if start >= end:
+            return None
+
+        return start,end

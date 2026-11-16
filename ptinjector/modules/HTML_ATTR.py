@@ -1,6 +1,10 @@
-from bs4 import BeautifulSoup
 from ptlibs import ptmisclib
 from ptinjector.response_utils import get_response_chain
+from bs4 import BeautifulSoup
+from ptinjector.response_utils import (
+    get_response_chain,
+    find_html_evidence,
+)
 
 def run(payload_object, definition_contents, request_data, injector):
     for payload_str in payload_object["payload"]:
@@ -22,4 +26,9 @@ def check_if_vulnerable(responses, verification_list, injector):
         attribute.casefold() in expected_attributes
         for tag in soup.find_all(True)
         for attribute in tag.attrs
+    )
+
+def find_evidence(responses, verification_list, injector):
+    return find_html_evidence(
+        responses, verification_list, search_attributes=True
     )

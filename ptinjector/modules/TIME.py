@@ -67,3 +67,33 @@ def check_if_vulnerable(responses, verification_list, injector):
         pair_has_expected_delay(responses[index], responses[index + 1], delay)
         for index in (0, 2)
     )
+
+
+
+def find_evidence(responses, verification_list, injector):
+    if not check_if_vulnerable(responses, verification_list, injector):
+        return None
+
+    delay = expected_delay(verification_list)
+    lines = [
+        "Time-based evidence (times include redirects).",
+        f"Requested delay: {delay:.6f} s.",
+        f"Required increase: {delay * MIN_DELAY_RATIO:.6f} s.",
+    ]
+
+    for pair_number, index in enumerate((0, 2), start=1):
+        control_time = response_time(responses[index])
+        payload_time = response_time(responses[index + 1])
+        increase = payload_time - control_time
+
+        lines.append(
+            f"Pair {pair_number}: control={control_time:.6f} s, "
+            f"payload={payload_time:.6f} s, "
+            f"increase=**{increase:.6f} s**."
+        )
+
+    return {
+        "response": responses[-1],
+        "spans": [],
+        "poc": "\n".join(lines),
+    }

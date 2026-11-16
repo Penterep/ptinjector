@@ -33,7 +33,7 @@ def find_dynamic_regions(first_text, second_text):
         "regions": regions,
     }
 
-def remove_dynamic_content(text, models):
+def remove_dynamic_content(text, models, positions=None):
     parts = split_content(text)
     ignored = set()
 
@@ -64,15 +64,73 @@ def remove_dynamic_content(text, models):
                     ignored.update(range(new_start, new_end))
 
     clean_parts = []
+    clean_positions = []
+    offset = 0
+
     for index, part in enumerate(parts):
+        end = offset + len(part)
+
         if index not in ignored:
             clean_parts.append(part)
+            if positions is not None:
+                clean_positions.extend(positions[offset:end])
 
-    return "".join(clean_parts)
+        offset = end
+
+    clean_text = "".join(clean_parts)
+    if positions is not None:
+        return clean_text, clean_positions
+
+    return clean_text
 
 
-def remove_reflected_payload(text, payload):
+def positions_to_spans(positions):
+    spans = []
+
+    for position in positions:
+        if position is None:
+            continue
+
+        if spans and position == spans[-1][1]:
+            start, _ = spans[-1]
+            spans[-1] = (start, position + 1)
+        else:
+            spans.append((position, position + 1))
+
+    return spans
+
+def replace_reflection_with_positions(text, value, positions):
+    if not value:
+        return text, positions
+
+    parts = []
+    new_positions = []
+    previous_end = 0
+
+    for match in re.finditer(re.escape(value), text):
+        start, end = match.span()
+
+        parts.append(text[previous_end:start])
+        new_positions.extend(positions[previous_end:start])
+
+        parts.append("[PAYLOAD]")
+        new_positions.extend([None] * len("[PAYLOAD]"))
+
+        previous_end = end
+
+    parts.append(text[previous_end:])
+    new_positions.extend(positions[previous_end:])
+
+    return "".join(parts), new_positions
+
+
+def remove_reflected_payload(text, payload, with_positions=False):
+
+    positions = list(range(len(text))) if with_positions else None
+
     if not payload:
+        if with_positions:
+            return text, positions
         return text
 
     payload_values = {payload, unquote(payload), unquote_plus(payload)}
@@ -99,7 +157,15 @@ def remove_reflected_payload(text, payload):
 
 
     for value in sorted(variants, key=len, reverse=True):
-        text = text.replace(value, "[PAYLOAD]")
+        if with_positions:
+            text, positions = replace_reflection_with_positions(
+                text, value, positions
+            )
+        else:
+            text = text.replace(value, "[PAYLOAD]")
+
+    if with_positions:
+        return text, positions
 
     return text
 
@@ -146,7 +212,7 @@ def run(payload_object, definition_contents, request_data, injector):
         true_response, true_dump = injector.run_payload_str(
             request_data, true_payload
         )
-        false_response, _ = injector.run_payload_str(
+        false_response, false_dump = injector.run_payload_str(
             request_data, false_payload
         )
 
@@ -159,6 +225,8 @@ def run(payload_object, definition_contents, request_data, injector):
             "false_response": false_response,
             "true_payload": true_payload,
             "false_payload": false_payload,
+            "true_dump": true_dump,
+            "false_dump": false_dump,
         }
 
         yield [true_payload, false_payload], comparison, true_dump
@@ -312,3 +380,62 @@ def check_if_vulnerable(comparison, verification_list, injector):
     false_text = remove_dynamic_content(false_text, models)
 
     return true_text != false_text
+def find_boolean_evidence(comparison):
+    prepared = {}
+    evidence = {"true": [], "false": []}
+    models = comparison["baseline"]["dynamic_models"]
+
+    for variant in ("true", "false"):
+        text, positions = remove_reflected_payload(
+            comparison[f"{variant}_response"].text,
+            comparison[f"{variant}_payload"],
+            with_positions=True,
+        )
+        text, positions = remove_dynamic_content(text, models, positions)
+
+        parts = split_content(text)
+        offsets = [0]
+        for part in parts:
+            offsets.append(offsets[-1] + len(part))
+
+        prepared[variant] = {
+            "parts": parts,
+            "offsets": offsets,
+            "positions": positions,
+        }
+
+    matcher = SequenceMatcher(
+        None, prepared["true"]["parts"], prepared["false"]["parts"],
+        autojunk=False,
+    )
+
+    for operation, a, b, c, d in matcher.get_opcodes():
+        if operation == "equal":
+            continue
+
+        changes = {}
+        for variant, first, last in (("true", a, b), ("false", c, d)):
+            item = prepared[variant]
+            start = item["offsets"][first]
+            end = item["offsets"][last]
+            changes[variant] = positions_to_spans(item["positions"][start:end])
+
+        if not any(changes.values()):
+            continue
+
+        for variant, first in (("true", a), ("false", c)):
+            spans = changes[variant]
+            if not spans:
+                item = prepared[variant]
+                start = item["offsets"][first]
+                original = comparison[f"{variant}_response"].text
+                anchor = next(
+                    (p for p in item["positions"][start:] if p is not None),
+                    len(original),
+                )
+                anchor = min(anchor, max(0, len(original) - 1))
+                spans = [(anchor, anchor)]
+
+            evidence[variant].extend(spans)
+
+    return evidence

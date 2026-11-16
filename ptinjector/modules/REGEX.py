@@ -18,23 +18,33 @@ def run(payload_object, definition_contents, request_data, injector):
             yield [payload_str], [baseline_response, current_response], dump
 
 
-def check_if_vulnerable(responses, verification_list, injector):
+def find_evidence(responses, verification_list, injector):
     if len(responses) != 2 or not verification_list:
-        return False
+        return None
 
     try:
         verification_re = re.compile(
             '(' + ')|('.join(verification_list) + ')'
         )
     except (TypeError, re.error):
-        return False
+        return None
 
     baseline_response, payload_response = responses
 
-    if re.search(verification_re, payload_response.text) is None:
-        return False
+    match = re.search(verification_re, payload_response.text) 
 
-    if baseline_response is None:
-        return True
+    if match is None:
+        return None
 
-    return re.search(verification_re, baseline_response.text) is None
+    if baseline_response is not None:
+        if re.search(verification_re, baseline_response.text) is not None:
+            return None
+
+    return {
+        "response": payload_response,
+        "spans": [match.span()],
+    }
+
+def check_if_vulnerable(responses, verification_list, injector):
+    evidence = find_evidence(responses, verification_list, injector)
+    return evidence is not None

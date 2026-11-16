@@ -30,6 +30,11 @@ import subprocess
 import socket
 import time
 import urllib
+from ptinjector.response_utils import (
+    get_response_chain,
+    make_evidence_response,
+    format_request_dump,
+)
 from typing import Tuple, List
 import importlib
 import requests
@@ -221,6 +226,7 @@ class PtInjector:
         self.initial_url = None
         self.redirect_target_url = None
         self.progress_active = False
+        self.payload_log = []
 
     def calculate_number_of_payloads(self, payloads):
         total = 0
@@ -247,6 +253,15 @@ class PtInjector:
 
         bar += "] " + str(percent) + " % (" + str(completed) + "/" + str(total) + ")"
         ptprinthelper.ptprint("\r" + bar, bullet_type="ADDITIONS", condition=  not self.use_json, colortext=True, flush=True, end="", clear_to_eol=True,)
+
+    def write_payload_log(self):
+        for entry in self.payload_log:
+            if entry["successful"]:
+                self.ptjsonlib.add_to_log(f"    **{entry['payload']}**")
+            else:
+                self.ptjsonlib.add_to_log(f"    {entry['payload']}")
+
+        self.payload_log.clear()
 
     def print_message(self, *args, **kwargs):
         if self.use_json or kwargs.get("condition") is False:
@@ -276,6 +291,7 @@ class PtInjector:
 
     def payloads_with_progress(self, payloads):
         for payload in payloads:
+            self.current_payload_log_start=len(self.payload_log)
             try: 
                 yield payload
             finally:
@@ -308,6 +324,12 @@ class PtInjector:
 
     def run_payload_str(self, request_data, payload_str):
         self.print_message(f"Sending payload: {payload_str}", bullet_type = "ADDITIONS", condition= self.args.verbose and not self.use_json, colortext=True, flush=True, end="\n")
+        self.payload_log.append(
+            {
+                "payload": payload_str,
+                "successful": False
+            }
+        )
         result = self._send_payload(payload_str, request_data)
         self.consecutive_request_errors = 0
         return result
@@ -484,6 +506,10 @@ class PtInjector:
         confirmed_payloads = list()
         mod = self.modules.get(payload_object["type"].upper(), DefaultVulnerability)
         sent_payloads = []
+
+        
+
+
         with closing(
             self.payloads_with_progress(payload_object["payload"])
         ) as tracked_payloads:
@@ -504,12 +530,86 @@ class PtInjector:
                 if mod.check_if_vulnerable(
                     responses, payload_object.get("verify", []), self
                 ):
+
+
+                    for entry in self.payload_log[self.current_payload_log_start:]:
+                        if entry["payload"] in payloads:
+                            entry["successful"] = True
+
+
+
                     confirmed_payloads.extend(payloads)
+
+                    content_type = self.request_parser.get_content_type(
+                        request_data["headers"]
+                    )
+                    extra_fields = {}
+
+                    if payload_object["type"].upper() == "BOOLEAN":
+                        evidence = mod.find_boolean_evidence(responses)
+
+                        for variant in ("true", "false"):
+                            variant_dump = responses[f"{variant}_dump"]
+
+                            variant_dump["request"] = format_request_dump(
+                                variant_dump["request"],
+                                responses[f"{variant}_response"],
+                                request_data,
+                                [responses[f"{variant}_payload"]],
+                                self.PLACEHOLDER_SYMBOL,
+                                content_type,
+                            )
+
+                            variant_dump["response"] = make_evidence_response(
+                                variant_dump["response"],
+                                responses[f"{variant}_response"].text,
+                                evidence[variant],
+                            )
+
+                        dump = responses["true_dump"]
+                        false_dump = responses["false_dump"]
+                        extra_fields["vulnRequest2"] = false_dump["request"]
+                        extra_fields["vulnResponse2"] = false_dump["response"]
+                    else:
+                        report_response = dump.get("target_response")
+                        injected_headers = ()
+                        evidence_finder = getattr(mod, "find_evidence", None)
+
+                        if evidence_finder is not None:
+                            evidence = evidence_finder(
+                                responses, payload_object.get("verify", []), self
+                            )
+                            if evidence is not None:
+                                report_response = evidence.get("response", report_response)
+                                injected_headers = evidence.get("request_header_names", ())
+
+                                dump["response"] = make_evidence_response(
+                                    dump["response"],
+                                    getattr(report_response, "text", ""),
+                                    evidence["spans"],
+                                    header_names=evidence.get("header_names", ()),
+                                )
+
+                                if "poc" in evidence:
+                                    extra_fields["poc"] = evidence["poc"]
+
+                        dump["request"] = format_request_dump(
+                            dump["request"],
+                            report_response,
+                            request_data,
+                            payloads,
+                            self.PLACEHOLDER_SYMBOL,
+                            content_type,
+                            injected_headers=injected_headers,
+                        )
+
                     self.ptjsonlib.add_vulnerability(
                         definition_contents.get("vulnerability"),
                         vuln_request=dump["request"],
                         vuln_response=dump["response"],
-                )
+                        **extra_fields,
+                    )
+
 
                     if not self.keep_testing:
                         break
@@ -565,13 +665,8 @@ class PtInjector:
         for vulnerability_name, definition_contents in self.LOADED_DEFINITIONS.items():
             if self.abort_scan:
                 break
-            if not definition_contents.get("payloads", False):
-                vulnerability_description = definition_contents.get('description', vulnerability_name)
-                self.print_message(f"No payloads available to test for {vulnerability_description} vulnerability" + bool(self.args.technology) * f" with chosen technology: {", ".join(self.args.technology)}", "WARNING", condition=not self.use_json, colortext=False, clear_to_eol=True)
-                continue
 
-            self.is_valid_request(args)
-            vulnerability_description: str = definition_contents.get('description', vulnerability_name)
+            vulnerability_description = definition_contents.get("description", vulnerability_name)
             self.print_message(
                 "Testing: " + (vulnerability_description or vulnerability_name.upper()),
                 "TITLE",
@@ -580,9 +675,26 @@ class PtInjector:
                 newline_above=True,
             )
 
+            if not definition_contents.get("payloads", False):
+                self.print_message(
+                    "No payloads available",
+                    "WARNING",
+                    condition=not self.use_json,
+                    colortext=False,
+                    clear_to_eol=True,
+                    indent=4,
+                )
+                continue
+
+            self.is_valid_request(args)
+            self.ptjsonlib.add_to_log(f"Testing for [{vulnerability_description}] vulnerability")
+
 
             for request_data in self.generate_request_data(args):
                 parameter = request_data['parameter']
+                self.ptjsonlib.add_to_log(f"Testing [{parameter}] parameter")
+                self.ptjsonlib.add_to_log("Send payloads:")
+
                 self.print_message(
                     f"Testing parameter: <{ptprinthelper.get_colored_text(parameter, 'TITLE')}>",
                     "TITLE",
@@ -610,7 +722,8 @@ class PtInjector:
                         new_confirmed_payloads, new_sent_payloads = self.run_payload_object(payload_object, definition_contents, request_data, vulnerability_name)
                         confirmed_payloads.extend(new_confirmed_payloads)
                         sent_payloads.extend(new_sent_payloads)
-                        
+
+
 
 
                         if len(self.scan_errors) > errors_before_payload:
@@ -632,6 +745,8 @@ class PtInjector:
                     if new_confirmed_payloads and not self.keep_testing:
                         break
 
+                self.write_payload_log()
+                
                 self.print_results(
                     parameter=parameter,
                     confirmed_payloads=confirmed_payloads,

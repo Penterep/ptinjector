@@ -720,6 +720,7 @@ class ErrorHandlingTest(unittest.TestCase):
         injector.use_json = True
         injector.ptjsonlib = ptjsonlib.PtJsonLib()
         injector.scan_errors = []
+        injector.payload_log = []
 
         injector.abort_scan = False
         injector.consecutive_request_errors = 0
@@ -745,7 +746,7 @@ class ErrorHandlingTest(unittest.TestCase):
         injector.LOADED_DEFINITIONS = {
             "test": {
                 "description": "Test vulnerability",
-                "payloads": [{"type": "REGEX"}, {"type": "REGEX"}],
+                "payloads": [{"type": "REGEX", "payload":["first"]}, {"type": "REGEX", "payload": ["second"]}],
             }
         }
         injector.is_valid_request = MagicMock()
@@ -780,7 +781,7 @@ class ErrorHandlingTest(unittest.TestCase):
         injector.LOADED_DEFINITIONS = {
             "test": {
                 "description": "Test vulnerability",
-                "payloads": [{"type": "REGEX"}],
+                "payloads": [{"type": "REGEX", "payload": ["test"]}],
             }
         }
         injector.is_valid_request = MagicMock()

@@ -15,19 +15,30 @@ def run(payload_object, definition_contents, request_data, injector):
 
             yield [payload_str], [baseline_response, current_response], dump
 
-def check_if_vulnerable(responses, verification_list, injector):
-    """Return True when injection adds an expected response header."""
+def find_evidence(responses, verification_list, injector):
     if len(responses) != 2 or not verification_list:
-        return False
+        return None
 
     expected_headers = {header.casefold() for header in verification_list}
-    
     baseline_headers = set()
 
     for baseline_part in get_response_chain(responses[0]):
         for header in baseline_part.headers:
             baseline_headers.add(header.casefold())
 
-    payload_headers = {header.casefold() for header in responses[1].headers}
+    payload_response = responses[1]
+    payload_headers = {header.casefold() for header in payload_response.headers}
+    matched_headers = (payload_headers - baseline_headers) & expected_headers
 
-    return bool((payload_headers - baseline_headers) & expected_headers)
+    if not matched_headers:
+        return None
+
+    return {
+        "response": payload_response,
+        "spans": [],
+        "header_names": sorted(matched_headers),
+    }
+
+
+def check_if_vulnerable(responses, verification_list, injector):
+    return find_evidence(responses, verification_list, injector) is not None
