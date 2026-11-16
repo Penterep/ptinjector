@@ -43,8 +43,17 @@ class VulnerableTargetHandler(BaseHTTPRequestHandler):
             body = self.boolean_sqli_response(parameters.get("id", [""])[0])
         elif parsed_url.path == "/time":
             value = parameters.get("id", [""])[0]
-            if "sleep(7)" in value.casefold():
-                time.sleep(5.8)
+
+            match = re.search(
+                r"\bsleep\((\d+(?:\.\d+)?)\)",
+                value,
+                re.IGNORECASE,
+            )
+
+            if match:
+                delay = float(match.group(1))
+                time.sleep(delay + 0.2)
+
             body = f"<html><body>{value}</body></html>"
         elif parsed_url.path == "/ssrf":
             value = parameters.get("url", [""])[0]
