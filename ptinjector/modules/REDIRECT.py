@@ -18,22 +18,29 @@ def run(payload_object, definition_contents, request_data, injector):
             ], dump
 
 
-def check_if_vulnerable(responses, verification_list, injector):
-    """Return True when a payload introduces a redirect to its exact value."""
+def find_evidence(responses, verification_list, injector):
     if len(responses) != 3:
-        return False
+        return None
 
     baseline_response, payload_response, payload = responses
     payload_location = payload_response.headers.get("Location", "")
 
     if not 300 <= payload_response.status_code < 400:
-        return False
+        return None
 
     if payload_location != payload:
-        return False
+        return None
 
     for baseline_part in get_response_chain(baseline_response):
         if baseline_part.headers.get("Location", "") == payload:
-            return False
+            return None
 
-    return True
+    return {
+        "response": payload_response,
+        "spans": [],
+        "header_names": ["Location"],
+    }
+
+
+def check_if_vulnerable(responses, verification_list, injector):
+    return find_evidence(responses, verification_list, injector) is not None

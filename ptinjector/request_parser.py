@@ -7,6 +7,7 @@ import xml.etree.ElementTree as ET
 from email import policy
 from email.parser import BytesParser
 import email
+import re
 
 class InjectionRequestParser(HttpRequestParser):
     def _parse_post_data(self, request_data: str, content_type: str) :
@@ -55,11 +56,16 @@ class InjectionRequestParser(HttpRequestParser):
                 "MIME-Version: 1.0\r\n"
                 "\r\n"
                 f"{request_data}"
-            ).encode("utf-8") # if multipart contains binary files like pictures or smth, this may corrupt the file s
+            ).encode("utf-8", errors="surrogateescape") # if multipart contains binary files like pictures or smth, this may corrupt the file s
 
 
 
             message = BytesParser(policy=policy.default).parsebytes(raw_message)
+
+            message.raw_body = request_data.encode(
+                "utf-8",
+                errors="surrogateescape"
+            )
 
             return message
          
@@ -97,13 +103,10 @@ class InjectionRequestParser(HttpRequestParser):
             )
 
         if content_type == "multipart/form-data":
-            raw_message = post_parameters.as_bytes()
-            separator = b"\r\n\r\n"
-
-            if separator not in raw_message:
-                separator = b"\n\n"
-
-            return raw_message.split(separator, 1)[1].decode("utf-8")
+            return post_parameters.raw_body.decode(
+                "utf-8",
+                errors="surrogateescape",
+            )
 
         return super()._reconstruct_post_data(
             post_parameters,
@@ -265,16 +268,73 @@ class InjectionRequestParser(HttpRequestParser):
         if not parameter:
             raise IndexError(f"Could not find parameter path: {parameter}")
 
-        for part in message.iter_parts():
-            name = part.get_param(
-                "name",
-                header="content-disposition",
-            )
-            if name == parameter:
-                encoding = part.get_content_charset() or "utf-8"
-                part.set_payload(new_value.encode(encoding))
-                return message
+        body = message.raw_body
+        boundary = message.get_boundary()
 
+        if not boundary:
+            raise ValueError("Multipart boundary is missing")
+
+        pattern = (
+            rb"(?m)^--"
+            + re.escape(boundary.encode("ascii"))
+            + rb"(--)?[ \t]*(?:\r?\n|\Z)"
+        )
+
+        boundaries = []
+
+        for match in re.finditer(pattern, body):
+            boundaries.append(match)
+
+            if match.group(1) == b"--":
+                break
+
+        parts = list(message.iter_parts())
+
+        if (
+            not boundaries
+            or boundaries[-1].group(1) != b"--"
+            or len(boundaries) != len(parts) + 1
+        ):
+            raise ValueError("Invalid multipart boundaries")
+
+                
+        for index, part in enumerate(parts):
+            name = part.get_param("name", header="content-disposition")
+
+            if name != parameter:
+                continue
+
+            part_start = boundaries[index].end()
+            part_end = boundaries[index + 1].start()
+
+            separator = re.search(
+                rb"\r?\n\r?\n",
+                body[part_start:part_end],
+            )
+
+            if separator is None:
+                raise ValueError("Multipart part is missing its header separator")
+
+            start = part_start + separator.end()
+            end = part_end
+
+            if body[end - 2:end] == b"\r\n":
+                end -= 2
+            elif body[end - 1:end] == b"\n":
+                end -= 1
+
+            if end < start:
+                raise ValueError("Invalid multipart value boundaries")
+
+            encoding = part.get_content_charset() or "utf-8"
+            value_bytes = new_value.encode(
+                encoding,
+                errors="surrogateescape",
+            )
+
+            message.raw_body = body[:start] + value_bytes + body[end:]
+            part.set_payload(value_bytes)
+            return message
         raise IndexError(
             f"Could not find multipart parameter: {parameter}"
         )
@@ -535,7 +595,7 @@ class InjectionRequestParser(HttpRequestParser):
                 if name == parameter:
                     encoding = part.get_content_charset() or "utf-8"
                     raw_value = part.get_payload(decode=True)
-                    return raw_value.decode(encoding)
+                    return raw_value.decode(encoding, errors="surrogateescape")
 
             raise ValueError(f"Parameter {parameter!r} not found ")
 
@@ -563,3 +623,22 @@ class InjectionRequestParser(HttpRequestParser):
             return post_parameters[parameter]
 
         raise ValueError(f"Parameter {parameter!r} not found")
+
+
+
+    def find_injected_span(text, template, placeholder):
+        if not placeholder or template.count(placeholder):
+            return None
+
+        prefix, suffix = template.split(placeholder, 1)
+
+        if not text.startswith(prefix):
+            return None
+
+        start = len(prefix)
+        end = len(text) - len(suffix) 
+
+        if start >= end:
+            return None
+
+        return start,end

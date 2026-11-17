@@ -1,6 +1,7 @@
 
 import requests
 import time
+import json
 
 
 VERIFICATION_ATTEMPTS = 5
@@ -22,6 +23,7 @@ def run(payload_object, definition_contents, request_data, injector):
 
     for payload_index, payload_str in enumerate(payload_object["payload"]):
         response, dump = injector.run_payload_str(request_data, payload_str)
+        dump = {**dump, "target_response": response}
         verification_url = (
             verification_urls[payload_index]
             if payload_index < len(verification_urls)
@@ -59,3 +61,25 @@ def run(payload_object, definition_contents, request_data, injector):
 def check_if_vulnerable(responses, verification_list, injector):
     """Return True when the verification service confirms the callback."""
     return any(callback_confirmed(response) for response in responses)
+
+
+
+def find_evidence(responses, verification_list, injector):
+    for response in responses:
+        if not callback_confirmed(response):
+            continue
+
+        value = json.dumps(response.json()["msg"], ensure_ascii=False)
+        url = getattr(response, "url", "unknown")
+
+        return {
+            "spans": [],
+            "poc": (
+                "Callback confirmed.\n"
+                f"Verification URL: {url}\n"
+                f"HTTP status: {response.status_code}\n"
+                f"msg: **{value}**"
+            ),
+        }
+
+    return None

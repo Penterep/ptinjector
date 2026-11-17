@@ -18,6 +18,7 @@
 from ptinjector.response_utils import get_response_chain
 import argparse
 import atexit
+from contextlib import closing
 import base64
 from urllib.parse import urljoin, urlsplit
 import random
@@ -29,6 +30,11 @@ import subprocess
 import socket
 import time
 import urllib
+from ptinjector.response_utils import (
+    get_response_chain,
+    make_evidence_response,
+    format_request_dump,
+)
 from typing import Tuple, List
 import importlib
 import requests
@@ -65,6 +71,7 @@ def headers_cookies_prepare(args):
 
 
 
+
 def header_pair(value):
     """Validate a header while allowing colons in its value."""
     header_name, separator, _ = value.partition(":")
@@ -86,24 +93,38 @@ def normalize_cli_markers(value, input_marker):
 
 
 def read_request_input(value):
-    request_path = os.path.expanduser(value)
+    raw_request = read_request_bytes(value)
+    headers, body = split_request_bytes(raw_request)
 
-    if os.path.isfile(request_path):
-        with open(request_path, "r") as file:
-            original_http_request = file.read()
+    headers_text = headers.decode("utf-8", errors="surrogateescape")
+    headers_text = headers_text.replace("\r\n", "\n")
+
+    body_text = body.decode("utf-8", errors="surrogateescape")
+
+    return headers_text + "\n\n" + body_text
+
+
+
+
+    
+
+def split_request_bytes(raw_request):
+    parts = re.split(rb"\r?\n\r?\n", raw_request, maxsplit=1)
+
+    if len(parts) != 2: 
+        raise ValueError(f"Request error {raw_request}")
     else:
-        original_http_request = base64.b64decode(
-            value,
-            validate=True,
-        ).decode("utf-8")
+        return parts[0], parts[1]
 
-    #cleaning rf file from \n \r
-    original_http_request = original_http_request.replace("\r\n", "\n").replace("\r", "\n")
-    headers, separator, body = original_http_request.partition("\n\n")
-    body = re.sub(r"(\r|\n|%0D|%0A)+\Z", "", body, flags=re.IGNORECASE)
-    original_http_request = headers + separator + body
 
-    return original_http_request
+
+def read_request_bytes(value):
+    request_path = os.path.expanduser(value)
+    if os.path.isfile(request_path):
+        with open(request_path, "rb") as file:
+            return file.read()
+    else:
+        return base64.b64decode(value, validate=True)
 
 def get_redirect_target(original_url, response):
     redirect_codes = {301,302, 303, 307, 308}
@@ -204,6 +225,78 @@ class PtInjector:
         self.initial_response = None
         self.initial_url = None
         self.redirect_target_url = None
+        self.progress_active = False
+        self.payload_log = []
+
+    def calculate_number_of_payloads(self, payloads):
+        total = 0
+        for item in payloads:
+            total += len(item["payload"])
+
+        return total
+
+    def show_progress(self, completed, total):
+        if total == 0 or self.use_json:
+            return
+
+        percent = completed / total * 100
+        width = 20
+        filled = int(completed / total * width) 
+
+        bar = "["
+
+        for i in range(0, width):
+            if (i < filled):
+                bar += "#"
+            else:
+                bar += "-"
+
+        bar += "] " + str(percent) + " % (" + str(completed) + "/" + str(total) + ")"
+        ptprinthelper.ptprint("\r" + bar, bullet_type="ADDITIONS", condition=  not self.use_json, colortext=True, flush=True, end="", clear_to_eol=True,)
+
+    def write_payload_log(self):
+        for entry in self.payload_log:
+            if entry["successful"]:
+                self.ptjsonlib.add_to_log(f"    **{entry['payload']}**")
+            else:
+                self.ptjsonlib.add_to_log(f"    {entry['payload']}")
+
+        self.payload_log.clear()
+
+    def print_message(self, *args, **kwargs):
+        if self.use_json or kwargs.get("condition") is False:
+            return
+
+        if self.progress_active:
+            ptprinthelper.ptprint(
+                "\r\033[2K",
+                end="",
+                flush=True
+            )
+
+        ptprinthelper.ptprint(*args, **kwargs)
+
+        if self.progress_active:
+            self.show_progress(
+                self.progress_completed,
+                self.progress_total,
+            )
+        
+
+    def update_progress(self):
+        self.progress_completed += 1
+        self.show_progress(
+            self.progress_completed, self.progress_total
+        )
+
+    def payloads_with_progress(self, payloads):
+        for payload in payloads:
+            self.current_payload_log_start=len(self.payload_log)
+            try: 
+                yield payload
+            finally:
+                self.update_progress()
+
 
     def load_modules(self, path: str):
         "loads from path, modules for testing different vulnerabilities, each should implement run() and check_if_vulnerable(), otherwise the defaults are used"
@@ -230,6 +323,13 @@ class PtInjector:
 
 
     def run_payload_str(self, request_data, payload_str):
+        self.print_message(f"Sending payload: {payload_str}", bullet_type = "ADDITIONS", condition= self.args.verbose and not self.use_json, colortext=True, flush=True, end="\n")
+        self.payload_log.append(
+            {
+                "payload": payload_str,
+                "successful": False
+            }
+        )
         result = self._send_payload(payload_str, request_data)
         self.consecutive_request_errors = 0
         return result
@@ -270,6 +370,9 @@ class PtInjector:
 
         self.initial_url = url
         self.initial_request_attempted = True
+
+        if isinstance(data, str):
+            data=data.encode("utf-8", errors="surrogateescape")
 
         try:
             response, _ = ptmisclib.load_url_from_web_or_temp(
@@ -390,7 +493,7 @@ class PtInjector:
             if self.consecutive_request_errors >= MAX_CONSECUTIVE_REQUEST_ERRORS:
                 self.abort_scan = True
 
-        ptprinthelper.ptprint(
+        self.print_message(
             f"Request failed during {context}: {error}",
             "WARNING",
             condition=not self.use_json,
@@ -403,35 +506,130 @@ class PtInjector:
         confirmed_payloads = list()
         mod = self.modules.get(payload_object["type"].upper(), DefaultVulnerability)
         sent_payloads = []
-        for payloads, responses, dump in mod.run(payload_object, definition_contents, request_data, injector=self):
-            if self.args.verbose:
-                sent_payloads.extend(payloads)
-            if confirmed_payloads and not self.keep_testing:
-                break
-            if mod.check_if_vulnerable(responses, payload_object.get('verify', []), self):
-                confirmed_payloads.extend(payloads)
-                self.ptjsonlib.add_vulnerability(definition_contents.get("vulnerability"), vuln_request=dump["request"], vuln_response=dump["response"])
+
+        
+
+
+        with closing(
+            self.payloads_with_progress(payload_object["payload"])
+        ) as tracked_payloads:
+            module_payload_object = {
+                **payload_object,
+                "payload": tracked_payloads,
+            }   
+
+            for payloads, responses, dump in mod.run(
+                module_payload_object,
+                definition_contents,
+                request_data,
+                injector=self,
+            ):
+                if self.args.verbose:
+                    sent_payloads.extend(payloads)
+
+                if mod.check_if_vulnerable(
+                    responses, payload_object.get("verify", []), self
+                ):
+
+
+                    for entry in self.payload_log[self.current_payload_log_start:]:
+                        if entry["payload"] in payloads:
+                            entry["successful"] = True
+
+
+
+                    confirmed_payloads.extend(payloads)
+
+                    content_type = self.request_parser.get_content_type(
+                        request_data["headers"]
+                    )
+                    extra_fields = {}
+
+                    if payload_object["type"].upper() == "BOOLEAN":
+                        evidence = mod.find_boolean_evidence(responses)
+
+                        for variant in ("true", "false"):
+                            variant_dump = responses[f"{variant}_dump"]
+
+                            variant_dump["request"] = format_request_dump(
+                                variant_dump["request"],
+                                responses[f"{variant}_response"],
+                                request_data,
+                                [responses[f"{variant}_payload"]],
+                                self.PLACEHOLDER_SYMBOL,
+                                content_type,
+                            )
+
+                            variant_dump["response"] = make_evidence_response(
+                                variant_dump["response"],
+                                responses[f"{variant}_response"].text,
+                                evidence[variant],
+                            )
+
+                        dump = responses["true_dump"]
+                        false_dump = responses["false_dump"]
+                        extra_fields["vulnRequest2"] = false_dump["request"]
+                        extra_fields["vulnResponse2"] = false_dump["response"]
+                    else:
+                        report_response = dump.get("target_response")
+                        injected_headers = ()
+                        evidence_finder = getattr(mod, "find_evidence", None)
+
+                        if evidence_finder is not None:
+                            evidence = evidence_finder(
+                                responses, payload_object.get("verify", []), self
+                            )
+                            if evidence is not None:
+                                report_response = evidence.get("response", report_response)
+                                injected_headers = evidence.get("request_header_names", ())
+
+                                dump["response"] = make_evidence_response(
+                                    dump["response"],
+                                    getattr(report_response, "text", ""),
+                                    evidence["spans"],
+                                    header_names=evidence.get("header_names", ()),
+                                )
+
+                                if "poc" in evidence:
+                                    extra_fields["poc"] = evidence["poc"]
+
+                        dump["request"] = format_request_dump(
+                            dump["request"],
+                            report_response,
+                            request_data,
+                            payloads,
+                            self.PLACEHOLDER_SYMBOL,
+                            content_type,
+                            injected_headers=injected_headers,
+                        )
+
+                    self.ptjsonlib.add_vulnerability(
+                        definition_contents.get("vulnerability"),
+                        vuln_request=dump["request"],
+                        vuln_response=dump["response"],
+                        **extra_fields,
+                    )
+
+
+                    if not self.keep_testing:
+                        break
 
         return confirmed_payloads, sent_payloads
 
 
     def print_results(self, parameter, confirmed_payloads, sent_payloads, vulnerability_name, vulnerability_description, incomplete=False):
         def print_results_for_parameter(parameter, confirmed: List[str], sent_list: List[str]):
-            for payload in sent_list:
-                if self.args.verbose and payload:
-                    ptprinthelper.ptprint(f"Sending payload: {payload}", "ADDITIONS", condition=(not self.use_json), end=f"\n", colortext=True, clear_to_eol=True, indent=4)
-                elif payload:
-                    ptprinthelper.ptprint(f"Sending payload: {payload[:80] + '...' if len(payload) > 100 else payload}", "ADDITIONS", condition=(not self.use_json), end=f"\r",        colortext=True, clear_to_eol=True, indent=4)
+           
 
             if confirmed:
-                ptprinthelper.ptprint(f"Vulnerable to {vulnerability_description}", "VULN", condition=not self.use_json, colortext=True, clear_to_eol=True, indent=4)
-                ptprinthelper.ptprint(f"Executed payloads:", "TITLE", condition=not self.use_json, colortext=True, clear_to_eol=True, indent=4)
+                self.print_message(f"Vulnerable to {vulnerability_description}", "VULN", condition=not self.use_json, colortext=True, clear_to_eol=True, indent=4)
+                self.print_message(f"Executed payloads:", "TITLE", condition=not self.use_json, colortext=True, clear_to_eol=True, indent=4)
                 for c in confirmed:
-                    ptprinthelper.ptprint(c, "TEXT", condition=not self.use_json, colortext=False, indent=8)
+                    self.print_message(c, "TEXT", condition=not self.use_json, colortext=False, indent=8)
             elif incomplete:
-                ptprinthelper.ptprint(f"Inconclusive test for {vulnerability_description} due to request errors", "WARNING", condition=not self.use_json, colortext=False, clear_to_eol=True, indent=4)
+                self.print_message(f"Inconclusive test for {vulnerability_description} due to request errors", "WARNING", condition=not self.use_json, colortext=False, clear_to_eol=True, indent=4)
             else:
-                ptprinthelper.ptprint(f"Not vulnerable to {vulnerability_description}", "OK", condition=not self.use_json, colortext=True, clear_to_eol=True, indent=4)
+                self.print_message(f"Not vulnerable to {vulnerability_description}", "OK", condition=not self.use_json, colortext=True, clear_to_eol=True, indent=4)
 
         print_results_for_parameter(parameter=parameter, confirmed=confirmed_payloads, sent_list=sent_payloads)
 
@@ -444,17 +642,32 @@ class PtInjector:
         self.send_initial_request(args)
         self.prepare_initial_redirect()
 
+        parameter_count = sum(
+           1 for _ in self.generate_request_data(args)
+        )
+
+        
+
+        self.progress_completed = 0
+        self.progress_total = 0
+
+        for definition in self.LOADED_DEFINITIONS.values():
+            self.progress_total += (
+            self.calculate_number_of_payloads(
+                definition.get("payloads", [])
+            )
+            * parameter_count
+        )
+        self.progress_active = (
+            self.progress_total > 0 and not self.use_json
+        )
+        
         for vulnerability_name, definition_contents in self.LOADED_DEFINITIONS.items():
             if self.abort_scan:
                 break
-            if not definition_contents.get("payloads", False):
-                vulnerability_description = definition_contents.get('description', vulnerability_name)
-                ptprinthelper.ptprint(f"No payloads available to test for {vulnerability_description} vulnerability" + bool(self.args.technology) * f" with chosen technology: {", ".join(self.args.technology)}", "WARNING", condition=not self.use_json, colortext=False, clear_to_eol=True)
-                continue
 
-            self.is_valid_request(args)
-            vulnerability_description: str = definition_contents.get('description', vulnerability_name)
-            ptprinthelper.ptprint(
+            vulnerability_description = definition_contents.get("description", vulnerability_name)
+            self.print_message(
                 "Testing: " + (vulnerability_description or vulnerability_name.upper()),
                 "TITLE",
                 colortext=True,
@@ -462,9 +675,27 @@ class PtInjector:
                 newline_above=True,
             )
 
+            if not definition_contents.get("payloads", False):
+                self.print_message(
+                    "No payloads available",
+                    "WARNING",
+                    condition=not self.use_json,
+                    colortext=False,
+                    clear_to_eol=True,
+                    indent=4,
+                )
+                continue
+
+            self.is_valid_request(args)
+            self.ptjsonlib.add_to_log(f"Testing for [{vulnerability_description}] vulnerability")
+
+
             for request_data in self.generate_request_data(args):
                 parameter = request_data['parameter']
-                ptprinthelper.ptprint(
+                self.ptjsonlib.add_to_log(f"Testing [{parameter}] parameter")
+                self.ptjsonlib.add_to_log("Send payloads:")
+
+                self.print_message(
                     f"Testing parameter: <{ptprinthelper.get_colored_text(parameter, 'TITLE')}>",
                     "TITLE",
                     condition=not self.use_json,
@@ -472,6 +703,9 @@ class PtInjector:
                     clear_to_eol=True,
                     newline_above=False,
                 )
+
+
+
                 confirmed_payloads = []
                 sent_payloads = []
                 parameter_incomplete = False
@@ -479,14 +713,19 @@ class PtInjector:
                 payload_objects = definition_contents.get("payloads", [])
 
 
-           
+                self.show_progress(self.progress_completed, self.progress_total)
 
+                
                 for payload_object in payload_objects:
                     errors_before_payload = len(self.scan_errors)
                     try:
                         new_confirmed_payloads, new_sent_payloads = self.run_payload_object(payload_object, definition_contents, request_data, vulnerability_name)
                         confirmed_payloads.extend(new_confirmed_payloads)
                         sent_payloads.extend(new_sent_payloads)
+
+
+
+
                         if len(self.scan_errors) > errors_before_payload:
                             parameter_incomplete = True
                     except requests.exceptions.RequestException as error:
@@ -497,11 +736,17 @@ class PtInjector:
                         )
                         if self.abort_scan:
                             break
+
                         continue
+
+
+                    
 
                     if new_confirmed_payloads and not self.keep_testing:
                         break
 
+                self.write_payload_log()
+                
                 self.print_results(
                     parameter=parameter,
                     confirmed_payloads=confirmed_payloads,
@@ -513,6 +758,7 @@ class PtInjector:
 
                 if self.abort_scan:
                     break
+            
 
             if self.abort_scan:
                 break
@@ -523,7 +769,10 @@ class PtInjector:
             completion_message = f"Scan completed with {len(self.scan_errors)} request error(s); results are incomplete."
             self.ptjsonlib.add_properties({"incomplete": True, "requestErrors": self.scan_errors})
 
-        ptprinthelper.ptprint(completion_message or "Finished", "TITLE", condition=not self.use_json, clear_to_eol=True, newline_above=True)
+        self.print_message(completion_message or "Finished", "TITLE", condition=not self.use_json, clear_to_eol=True, newline_above=True)
+        if self.progress_active:
+            ptprinthelper.ptprint("\n", end="", flush=True)
+            self.progress_active = False
         if self.use_json:
             self.ptjsonlib.set_status("finished", completion_message)
             print(self.ptjsonlib.get_result_json())
@@ -536,6 +785,9 @@ class PtInjector:
         def remember_response(response, *args, **kwargs):
             received_responses.append(response)
 
+        if isinstance(data, str):
+            data = data.encode("utf-8", errors="surrogateescape")
+        
         try: 
             return ptmisclib.load_url_from_web_or_temp(
                 url,

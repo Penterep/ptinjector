@@ -34,15 +34,22 @@ class RecordingInjector:
         self.payloads.append(payload)
         return next(self.responses), {"request": payload, "response": ""}
 
+   
 
 class TimeVerifierTest(unittest.TestCase):
+    def test_delay_equal_to_threshold_is_not_enough(self):
+        baseline = make_response(seconds=0.25)
+        response = make_response(seconds=7.25)
 
+        self.assertFalse(
+            TIME.pair_has_expected_delay(baseline, response, 7, progressive=True)
+        )
     def test_delay_in_redirect_response_is_detected(self):
         baseline = make_response(seconds=0.1)
 
         payload_response = make_response(seconds=0.1)
         payload_response.history = [
-            make_response(seconds=1.0, status_code=302),
+            make_response(seconds=1.1, status_code=302),
         ]
 
         self.assertTrue(
@@ -78,9 +85,9 @@ class TimeVerifierTest(unittest.TestCase):
     def test_run_confirms_a_suspected_delay_with_a_second_pair(self):
         injector = RecordingInjector([
             make_response(seconds=0.1),
-            make_response(seconds=5.8),
+            make_response(seconds=7.3),
             make_response(seconds=0.2),
-            make_response(seconds=5.9),
+            make_response(seconds=7.4),
         ])
 
         results = list(TIME.run(
@@ -96,9 +103,9 @@ class TimeVerifierTest(unittest.TestCase):
     def test_repeated_expected_delay_is_vulnerable(self):
         responses = [
             make_response(seconds=3.0),
-            make_response(seconds=8.7),
+            make_response(seconds=10.2),
             make_response(seconds=4.0),
-            make_response(seconds=9.8),
+            make_response(seconds=11.3),
         ]
         self.assertTrue(TIME.check_if_vulnerable(responses, [7], None))
 
@@ -107,14 +114,14 @@ class TimeVerifierTest(unittest.TestCase):
             make_response(seconds=5.0),
             make_response(seconds=7.1),
             make_response(seconds=4.0),
-            make_response(seconds=9.8),
+            make_response(seconds=11.3),
         ]
         self.assertFalse(TIME.check_if_vulnerable(responses, [7], None))
 
     def test_one_off_latency_spike_is_rejected(self):
         responses = [
             make_response(seconds=0.1),
-            make_response(seconds=6.0),
+            make_response(seconds=8.0),
             make_response(seconds=0.1),
             make_response(seconds=0.2),
         ]
@@ -123,18 +130,18 @@ class TimeVerifierTest(unittest.TestCase):
     def test_changed_status_code_is_rejected(self):
         responses = [
             make_response(seconds=0.1),
-            make_response(seconds=6.0, status_code=500),
+            make_response(seconds=8.0, status_code=500),
             make_response(seconds=0.1),
-            make_response(seconds=6.0, status_code=500),
+            make_response(seconds=8.0, status_code=500),
         ]
         self.assertFalse(TIME.check_if_vulnerable(responses, [7], None))
 
     def test_repeated_slow_server_errors_are_rejected(self):
         responses = [
             make_response(seconds=0.1, status_code=500),
-            make_response(seconds=6.0, status_code=500),
+            make_response(seconds=8.0, status_code=500),
             make_response(seconds=0.1, status_code=500),
-            make_response(seconds=6.0, status_code=500),
+            make_response(seconds=8.0, status_code=500),
         ]
         self.assertFalse(TIME.check_if_vulnerable(responses, [7], None))
 
@@ -720,6 +727,7 @@ class ErrorHandlingTest(unittest.TestCase):
         injector.use_json = True
         injector.ptjsonlib = ptjsonlib.PtJsonLib()
         injector.scan_errors = []
+        injector.payload_log = []
 
         injector.abort_scan = False
         injector.consecutive_request_errors = 0
@@ -745,7 +753,7 @@ class ErrorHandlingTest(unittest.TestCase):
         injector.LOADED_DEFINITIONS = {
             "test": {
                 "description": "Test vulnerability",
-                "payloads": [{"type": "REGEX"}, {"type": "REGEX"}],
+                "payloads": [{"type": "REGEX", "payload":["first"]}, {"type": "REGEX", "payload": ["second"]}],
             }
         }
         injector.is_valid_request = MagicMock()
@@ -780,7 +788,7 @@ class ErrorHandlingTest(unittest.TestCase):
         injector.LOADED_DEFINITIONS = {
             "test": {
                 "description": "Test vulnerability",
-                "payloads": [{"type": "REGEX"}],
+                "payloads": [{"type": "REGEX", "payload": ["test"]}],
             }
         }
         injector.is_valid_request = MagicMock()
