@@ -434,6 +434,100 @@ class RedirectVerifierTest(unittest.TestCase):
 
 
 class BooleanVerifierTest(unittest.TestCase):
+
+    def test_evidence_reuses_cleaned_responses(self):
+        comparison = {
+            "baseline": {
+                "dynamic_models": [
+                    BOOLEAN.find_dynamic_regions(
+                        "<p>result</p><nonce>100</nonce>",
+                        "<p>result</p><nonce>200</nonce>",
+                    ),
+                ],
+            },
+            "true_response": make_response(
+                text="<p>found</p><nonce>300</nonce>",
+            ),
+            "false_response": make_response(
+                text="<p>empty</p><nonce>400</nonce>",
+            ),
+            "true_payload": "",
+            "false_payload": "",
+        }
+
+        # Důkazy vypočítané samostatně slouží jako reference.
+        expected = BOOLEAN.find_boolean_evidence(dict(comparison))
+
+        with patch.object(
+            BOOLEAN,
+            "remove_dynamic_content",
+            wraps=BOOLEAN.remove_dynamic_content,
+        ) as clean:
+            self.assertTrue(
+                BOOLEAN.check_if_vulnerable(comparison, [], None)
+            )
+            self.assertEqual(clean.call_count, 2)
+
+            actual = BOOLEAN.find_boolean_evidence(comparison)
+
+            self.assertEqual(clean.call_count, 2)
+
+        self.assertEqual(actual, expected)
+        self.assertTrue(actual["true"])
+        self.assertTrue(actual["false"])
+
+    def test_dynamic_content_does_not_hide_real_difference(self):
+        model = BOOLEAN.find_dynamic_regions(
+            "<p>result</p><nonce>100</nonce>",
+            "<p>result</p><nonce>200</nonce>",
+        )
+
+        for false_result, expected in [
+            ("found", False),
+            ("empty", True),
+        ]:
+            with self.subTest(false_result=false_result):
+                comparison = {
+                    "baseline": {"dynamic_models": [model]},
+                    "true_response": make_response(
+                        text="<p>found</p><nonce>300</nonce>",
+                    ),
+                    "false_response": make_response(
+                        text=f"<p>{false_result}</p><nonce>400</nonce>",
+                    ),
+                    "true_payload": "",
+                    "false_payload": "",
+                }
+
+                self.assertEqual(
+                    BOOLEAN.check_if_vulnerable(comparison, [], None),
+                    expected,
+                )
+
+        
+    def test_identical_baseline_skips_diff(self):
+        text = "<div>Stejný obsah</div>" * 300
+
+        with patch.object(BOOLEAN, "SequenceMatcher") as matcher:
+            model = BOOLEAN.find_dynamic_regions(text, text)
+
+        self.assertEqual(model["reference"], BOOLEAN.split_content(text))
+        self.assertEqual(model["regions"], [])
+        matcher.assert_not_called()
+
+    def test_changed_baseline_still_finds_dynamic_region(self):
+        first = "<p>Token: AAA</p>"
+        second = "<p>Token: BBB</p>"
+
+        model = BOOLEAN.find_dynamic_regions(first, second)
+        token_index = model["reference"].index("AAA")
+
+        self.assertEqual(
+            model["regions"],
+            [(token_index, token_index + 1)],
+        )
+
+
     def test_json_content_type_with_charset_is_parsed(self):
         response = make_response(
             text='{"result": "five"}',
