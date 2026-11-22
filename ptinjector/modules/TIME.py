@@ -1,5 +1,62 @@
 
 from decimal import Decimal, ROUND_CEILING
+from time import monotonic
+from requests.exceptions import RequestException
+from datetime import timedelta
+
+
+CONTROL_MAX_AGE_SECONDS = 30
+CONTROL_MAX_USES = 10
+
+def get_control(request_data, injector, control_id, force=False):
+    cached = request_data.get("time_control")
+
+    if (
+        not force
+        and cached is not None
+        and cached["uses"] < CONTROL_MAX_USES
+        and monotonic() - cached["measured_at"] < CONTROL_MAX_AGE_SECONDS
+    ):
+        return cached["response"]
+
+    request_data.pop("time_control", None)
+
+    errors_before = len(getattr(injector, "scan_errors", []))
+    measured_at = monotonic()
+
+    response, _ = injector.run_payload_str(request_data, control_id)
+
+    if (
+        200 <= response.status_code < 400
+        and len(getattr(injector, "scan_errors", [])) == errors_before
+    ):
+        request_data["time_control"] = {
+            "response": response,
+            "measured_at": measured_at,
+            "uses": 0,
+        }
+
+    return response
+
+def send_timing_payload(request_data, injector, payload):
+    errors_before = len(getattr(injector, "scan_errors", []))
+    try:
+        response, dump = injector.run_payload_str(request_data, payload)
+    except RequestException:
+        request_data.pop("time_control", None)
+        raise
+
+    cached = request_data.get("time_control")
+    if cached is not None:
+        cached["uses"] += 1
+        if (
+            response.status_code != cached["response"].status_code
+            or len(getattr(injector, "scan_errors", [])) != errors_before
+        ):
+            request_data.pop("time_control", None)
+
+    return response, dump
+
 
 class TimingResponses(list):
     def __init__(self, responses, progressive):
@@ -75,23 +132,28 @@ def render_payload(payload_template, delay):
     
 
 
-def pair_has_expected_delay(baseline_response, payload_response, delay, progressive=False):
+def pair_has_expected_delay(
+    baseline_response, payload_response, delay, progressive=False
+):
     if (
         baseline_response.status_code != payload_response.status_code
         or not 200 <= payload_response.status_code < 400
     ):
         return False
 
-    baseline_time = response_time(baseline_response)
-    payload_time = response_time(payload_response)
+    baseline_time = sum(
+        (part.elapsed for part in get_response_chain(baseline_response)),
+        timedelta(),
+    )
+    payload_time = sum(
+        (part.elapsed for part in get_response_chain(payload_response)),
+        timedelta(),
+    )
 
     increase = payload_time - baseline_time
+    required_delay = delay if progressive else delay * 0.8
 
-    if progressive:
-        return increase > delay
-
-    return increase >= delay * 0.8
-
+    return increase >= timedelta(seconds=required_delay)
 
 def run(payload_object, definition_contents, request_data, injector):
     threshold = expected_delay(payload_object.get("verify", []))
@@ -101,7 +163,6 @@ def run(payload_object, definition_contents, request_data, injector):
         if progressive:
             if threshold is None:
                 raise ValueError("TIME requires one positive number in verify.")
-
             steps = delay_steps(threshold)
         else:
             steps = [None]
@@ -116,35 +177,57 @@ def run(payload_object, definition_contents, request_data, injector):
             if requested_delay is not None:
                 control_id += f"-{step_index}"
 
-            baseline, _ = injector.run_payload_str(
-                request_data, f"{control_id}-1"
+            errors_before = len(getattr(injector, "scan_errors", []))
+            baseline = get_control(
+                request_data, injector, f"{control_id}-1"
             )
-            response, dump = injector.run_payload_str(
-                request_data, payload_str
+            response, dump = send_timing_payload(
+                request_data, injector, payload_str
             )
 
             responses = TimingResponses([baseline, response], progressive)
             confirmed = False
 
-            if threshold is not None and pair_has_expected_delay(
-                baseline, response, threshold, progressive=progressive
+            if (
+                threshold is not None
+                and len(getattr(injector, "scan_errors", [])) == errors_before
+                and 200 <= response.status_code < 400
+                and (
+                    baseline.status_code != response.status_code
+                    or pair_has_expected_delay(
+                        baseline, response, threshold, progressive=progressive
+                    )
+                )
             ):
-                second_baseline, _ = injector.run_payload_str(
-                    request_data, f"{control_id}-2"
-                )
-                second_response, dump = injector.run_payload_str(
-                    request_data, payload_str
-                )
+                # Screening with a cached control is not evidence.
+                responses = TimingResponses([], progressive)
+                for confirmation in (1, 2):
+                    errors_before = len(getattr(injector, "scan_errors", []))
+                    fresh_baseline = get_control(
+                        request_data, injector,
+                        f"{control_id}-confirm-{confirmation}", force=True,
+                    )
+                    fresh_response, dump = send_timing_payload(
+                        request_data, injector, payload_str
+                    )
+                    if len(getattr(injector, "scan_errors", [])) != errors_before:
+                        responses.clear()
+                        break
 
-                responses.extend([second_baseline, second_response])
-                confirmed = pair_has_expected_delay(
-                    second_baseline, second_response, threshold, progressive=progressive
-                )
+                    responses.extend([fresh_baseline, fresh_response])
+                    if not pair_has_expected_delay(
+                        fresh_baseline, fresh_response, threshold,
+                        progressive=progressive,
+                    ):
+                        break
+
+                confirmed = check_if_vulnerable(responses, [threshold], injector)
 
             yield [payload_str], responses, dump
 
             if confirmed:
                 break
+
 
 
 def check_if_vulnerable(responses, verification_list, injector):
@@ -178,7 +261,7 @@ def find_evidence(responses, verification_list, injector):
     delay = expected_delay(verification_list)
     progressive = getattr(responses, "progressive", False)
     required_increase = delay if progressive else delay * 0.8
-    comparison = ">" if progressive else ">="
+    comparison = ">=" if progressive else ">="
 
     lines = [
         "Time-based evidence (times include redirects).",

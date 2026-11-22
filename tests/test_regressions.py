@@ -37,13 +37,112 @@ class RecordingInjector:
    
 
 class TimeVerifierTest(unittest.TestCase):
-    def test_delay_equal_to_threshold_is_not_enough(self):
-        baseline = make_response(seconds=0.25)
-        response = make_response(seconds=7.25)
 
-        self.assertFalse(
-            TIME.pair_has_expected_delay(baseline, response, 7, progressive=True)
-        )
+
+    def test_control_is_refreshed_when_required(self):
+        cases = [
+            (TIME.CONTROL_MAX_AGE_SECONDS, 0, False),
+            (0, TIME.CONTROL_MAX_USES, False),
+            (0, 0, True),
+        ]
+
+        for age, uses, force in cases:
+            with self.subTest(age=age, uses=uses, force=force):
+                old_response = make_response(seconds=0.2)
+                new_response = make_response(seconds=0.3)
+                injector = RecordingInjector([
+                    old_response,
+                    new_response,
+                ])
+                request_data = {}
+
+                with patch.object(
+                    TIME, "monotonic", return_value=0
+                ) as clock:
+                    TIME.get_control(
+                        request_data, injector, "control-first"
+                    )
+
+                    clock.return_value = age
+                    request_data["time_control"]["uses"] = uses
+
+                    result = TIME.get_control(
+                        request_data,
+                        injector,
+                        "control-new",
+                        force=force,
+                    )
+
+                self.assertIs(result, new_response)
+                self.assertEqual(
+                    injector.payloads,
+                    ["control-first", "control-new"],
+                )
+
+
+    def test_control_is_reused(self):
+        response = make_response(seconds=0.2)
+        injector = RecordingInjector([response])
+        request_data = {}
+
+        with patch.object(TIME, "monotonic", return_value=0):
+            first = TIME.get_control(
+                request_data, injector, "control-first"
+            )
+            second = TIME.get_control(
+                request_data, injector, "control-second"
+            )
+
+        self.assertIs(first, response)
+        self.assertIs(second, response)
+        self.assertEqual(injector.payloads, ["control-first"])
+
+    def test_progressive_delay_threshold_is_inclusive(self):
+        for baseline_seconds, response_seconds, expected in (
+            (0.25, 7.249999, False),
+            (0.25, 7.25, True),
+            (0.25, 7.250001, True),
+            (0.2, 7.0, False),
+            (1.000001, 8.000001, True),
+        ):
+            with self.subTest(baseline=baseline_seconds, response=response_seconds):
+                self.assertEqual(
+                    TIME.pair_has_expected_delay(
+                        make_response(seconds=baseline_seconds),
+                        make_response(seconds=response_seconds),
+                        7,
+                        progressive=True,
+                    ),
+                    expected,
+                )
+
+    def test_exact_delay_is_confirmed_and_reported_with_inclusive_threshold(self):
+        injector = RecordingInjector([
+            make_response(seconds=t)
+            for t in (0.25, 7.25, 0.25, 7.25, 0.25, 7.25)
+        ])
+        with patch.object(TIME, "delay_steps", return_value=[7]):
+            result = next(TIME.run(
+                {"payload": ["sleep(PTINJECTORDELAY)"], "verify": [7]},
+                {}, {}, injector,
+            ))
+        responses = result[1]
+        self.assertEqual(len(injector.payloads), 6)
+        self.assertTrue(TIME.check_if_vulnerable(responses, [7], injector))
+        evidence = TIME.find_evidence(responses, [7], injector)
+        self.assertIn("Required increase over control: >= 7.000000 s.", evidence["poc"])
+
+    def test_nonprogressive_threshold_keeps_existing_tolerance(self):
+        for elapsed, expected in ((5.849999, False), (5.85, True), (5.850001, True)):
+            with self.subTest(elapsed=elapsed):
+                self.assertEqual(
+                    TIME.pair_has_expected_delay(
+                        make_response(seconds=0.25), make_response(seconds=elapsed),
+                        7, progressive=False,
+                    ),
+                    expected,
+                )
+
     def test_delay_in_redirect_response_is_detected(self):
         baseline = make_response(seconds=0.1)
 
@@ -58,47 +157,96 @@ class TimeVerifierTest(unittest.TestCase):
             )
         )
     
-    def test_run_uses_a_fresh_control_before_each_negative_payload(self):
+    
+
+    def test_run_reuses_control_for_negative_payloads(self):
         injector = RecordingInjector([
             make_response(seconds=0.1),
             make_response(seconds=0.2),
-            make_response(seconds=0.1),
             make_response(seconds=0.2),
         ])
-
         results = list(TIME.run(
-            {"payload": ["sleep-a", "sleep-b"]},
-            {},
-            {"parameter": "id"},
-            injector,
+            {"payload": ["sleep-a", "sleep-b"], "verify": [7]},
+            {}, {}, injector,
         ))
-
         self.assertEqual(injector.payloads, [
             f"{injector.RANDOM_STRING}-control-0-1",
-            "sleep-a",
-            f"{injector.RANDOM_STRING}-control-1-1",
-            "sleep-b",
+            "sleep-a", "sleep-b",
         ])
         self.assertEqual(len(results), 2)
-        self.assertTrue(all(len(responses) == 2 for _, responses, _ in results))
+        self.assertIs(results[0][1][0], results[1][1][0])
 
-    def test_run_confirms_a_suspected_delay_with_a_second_pair(self):
+    def test_run_confirms_with_two_fresh_pairs(self):
         injector = RecordingInjector([
-            make_response(seconds=0.1),
-            make_response(seconds=7.3),
-            make_response(seconds=0.2),
-            make_response(seconds=7.4),
+            make_response(seconds=t)
+            for t in (0.1, 7.3, 0.2, 7.4, 0.3, 7.5)
         ])
-
         results = list(TIME.run(
-            {"payload": ["sleep-a"], "verify": [7]},
-            {},
-            {"parameter": "id"},
-            injector,
+            {"payload": ["sleep-a"], "verify": [7]}, {}, {}, injector,
+        ))
+        self.assertEqual(injector.payloads, [
+            f"{injector.RANDOM_STRING}-control-0-1", "sleep-a",
+            f"{injector.RANDOM_STRING}-control-0-confirm-1", "sleep-a",
+            f"{injector.RANDOM_STRING}-control-0-confirm-2", "sleep-a",
+        ])
+        responses = results[0][1]
+        self.assertEqual(len(responses), 4)
+        self.assertEqual(TIME.response_time(responses[0]), 0.2)
+        self.assertTrue(TIME.check_if_vulnerable(responses, [7], injector))
+
+    def test_progressive_steps_use_one_control(self):
+        injector = RecordingInjector([
+            make_response(seconds=0.1) for _ in range(7)
+        ])
+        results = list(TIME.run(
+            {"payload": ["sleep(PTINJECTORDELAY)"], "verify": [7]},
+            {}, {}, injector,
+        ))
+        self.assertEqual(injector.payloads, [
+            f"{injector.RANDOM_STRING}-control-0-0-1",
+            "sleep(0.0001)", "sleep(0.001)", "sleep(0.01)",
+            "sleep(0.1)", "sleep(1)", "sleep(7.0)",
+        ])
+        self.assertTrue(all(
+            not TIME.check_if_vulnerable(responses, [7], injector)
+            for _, responses, _ in results
         ))
 
-        self.assertEqual(len(results[0][1]), 4)
-        self.assertEqual(injector.payloads[-1], "sleep-a")
+    def test_run_rejects_server_slowdown_and_spikes(self):
+        for times in (
+            (0.1, 8, 8, 8),
+            (0.1, 8, 0.1, 0.2),
+            (0.1, 8, 0.1, 8, 0.1, 0.2),
+        ):
+            with self.subTest(times=times):
+                injector = RecordingInjector([
+                    make_response(seconds=t) for t in times
+                ])
+                results = list(TIME.run(
+                    {"payload": ["sleep-a"], "verify": [7]}, {}, {}, injector,
+                ))
+                self.assertEqual(len(injector.payloads), len(times))
+                self.assertFalse(
+                    TIME.check_if_vulnerable(results[0][1], [7], injector)
+                )
+                self.assertIsNone(
+                    TIME.find_evidence(results[0][1], [7], injector)
+                )
+
+    def test_run_refreshes_control_after_use_limit(self):
+        count = TIME.CONTROL_MAX_USES + 1
+        injector = RecordingInjector([
+            make_response(seconds=0.1) for _ in range(count + 2)
+        ])
+        with patch.object(TIME, "monotonic", return_value=0):
+            results = list(TIME.run(
+                {"payload": ["sleep-a"] * count, "verify": [7]},
+                {}, {}, injector,
+            ))
+        self.assertEqual(len(injector.payloads), count + 2)
+        self.assertIs(results[0][1][0], results[-2][1][0])
+        self.assertIsNot(results[0][1][0], results[-1][1][0])
+
 
     def test_repeated_expected_delay_is_vulnerable(self):
         responses = [
@@ -910,6 +1058,29 @@ class ErrorHandlingTest(unittest.TestCase):
 
 
 class PayloadGeneratorTest(unittest.TestCase):
+    def test_mysql_time_operators_are_separated_from_sleep(self):
+        import json
+        import re
+        from pathlib import Path
+        from urllib.parse import unquote
+
+        path = Path(__file__).parents[1] / "ptinjector/definitions/sqli_time.json"
+        definition = json.loads(path.read_text())
+        mysql = next(
+            item for item in definition["payloads"]
+            if "mysql" in item.get("technologies", [])
+        )
+        payloads = [
+            TIME.render_payload(unquote(payload), 7.0)
+            for item in payloadgenerator.prepare_templates([mysql])
+            for payload in item["payload"]
+        ]
+        self.assertIn("' and sleep(7.0)='#", payloads)
+        self.assertFalse(any(
+            re.search(r"(?:and|or)sleep\(", payload, re.IGNORECASE)
+            for payload in payloads
+        ))
+
     def test_generated_payload_objects_are_distinct_and_reusable(self):
         template = {
             "payload": ["value"],

