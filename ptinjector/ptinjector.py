@@ -15,7 +15,7 @@
     You should have received a copy of the GNU General Public License
     along with ptinjector.  If not, see <https://www.gnu.org/licenses/>.
 """
-from ptinjector.response_utils import get_response_chain
+
 import argparse
 import atexit
 from contextlib import closing
@@ -228,6 +228,34 @@ class PtInjector:
         self.progress_active = False
         self.payload_log = []
 
+
+    def validate_requested_parameter(self, http_request, parameter):
+        if not parameter:
+            return
+
+        available = []
+        while True:
+            try:
+                name = self.request_parser.get_parameter_name_by_index(
+                    http_request, len(available)
+                )
+            except IndexError:
+                break
+            available.append(name)
+
+        if parameter.isdigit():
+            exists = int(parameter) < len(available)
+        else:
+            exists = parameter in available
+
+        if not exists:
+            names = ", ".join(repr(name) for name in available) or "(none)"
+            self.ptjsonlib.end_error(
+                f"Parameter {parameter!r} was not found in the request. "
+                f"Available parameters: {names}.",
+                self.use_json,
+            )
+
     def calculate_number_of_payloads(self, payloads):
         total = 0
         for item in payloads:
@@ -239,7 +267,7 @@ class PtInjector:
         if total == 0 or self.use_json:
             return
 
-        percent = completed / total * 100
+        percent = round(completed / total * 100)
         width = 20
         filled = int(completed / total * width) 
 
@@ -247,12 +275,15 @@ class PtInjector:
 
         for i in range(0, width):
             if (i < filled):
-                bar += "#"
+                bar += "█"
             else:
                 bar += "-"
 
         bar += "] " + str(percent) + " % (" + str(completed) + "/" + str(total) + ")"
-        ptprinthelper.ptprint("\r" + bar, bullet_type="ADDITIONS", condition=  not self.use_json, colortext=True, flush=True, end="", clear_to_eol=True,)
+        if percent >= 100:
+             ptprinthelper.ptprint("")
+        else:
+            ptprinthelper.ptprint("\r" + bar, bullet_type="ADDITIONS", condition=  not self.use_json, colortext=True, flush=True, end="", clear_to_eol=True,)
 
     def write_payload_log(self):
         for entry in self.payload_log:
@@ -285,9 +316,11 @@ class PtInjector:
 
     def update_progress(self):
         self.progress_completed += 1
+
         self.show_progress(
             self.progress_completed, self.progress_total
         )
+
 
     def payloads_with_progress(self, payloads):
         for payload in payloads:
@@ -665,8 +698,22 @@ class PtInjector:
         for vulnerability_name, definition_contents in self.LOADED_DEFINITIONS.items():
             if self.abort_scan:
                 break
+            if not definition_contents.get("payloads", False):
+                vulnerability_description = definition_contents.get('description', vulnerability_name) 
+                self.print_message(
+                    f"No payloads available to test for {vulnerability_description} vulnerability"
+                    + bool(self.args.technology)
+                    * f" with chosen technology: {', '.join(self.args.technology)}",
+                    "WARNING",
+                    condition=not self.use_json,
+                    colortext=False,
+                    clear_to_eol=True,
+                )
+                continue
 
-            vulnerability_description = definition_contents.get("description", vulnerability_name)
+            self.is_valid_request(args)
+            vulnerability_description: str = definition_contents.get('description', vulnerability_name)
+            self.ptjsonlib.add_to_log(f"Testing for [{vulnerability_description}] vulnerability")
             self.print_message(
                 "Testing: " + (vulnerability_description or vulnerability_name.upper()),
                 "TITLE",
@@ -674,20 +721,6 @@ class PtInjector:
                 condition=not self.use_json,
                 newline_above=True,
             )
-
-            if not definition_contents.get("payloads", False):
-                self.print_message(
-                    "No payloads available",
-                    "WARNING",
-                    condition=not self.use_json,
-                    colortext=False,
-                    clear_to_eol=True,
-                    indent=4,
-                )
-                continue
-
-            self.is_valid_request(args)
-            self.ptjsonlib.add_to_log(f"Testing for [{vulnerability_description}] vulnerability")
 
 
             for request_data in self.generate_request_data(args):
@@ -1057,6 +1090,7 @@ class PtInjector:
 
 
             http_request = self.request_parser.is_valid_http_request(args.request_text)
+
             _req_data = self.request_parser.get_request_data(http_request)
             if (
                 not self.PLACEHOLDER_EXISTS
@@ -1072,6 +1106,24 @@ class PtInjector:
                 and not args.data
             ):
                 self.ptjsonlib.end_error(f"Provided URL contains no parameters to test.", self.use_json)
+
+
+
+        
+        if args.parameter:
+            if not args.request_file:
+                http_request = self.request_parser.build_request(
+                    url=args.url,
+                    headers=self.http_headers.copy(),
+                    request_data=args.data,
+                )
+
+            for parameter in split_parameters(args.parameter):
+                self.validate_requested_parameter(
+                    http_request,
+                    parameter,
+                )
+
         return True
 
     def generate_request_data(self, args):
@@ -1204,10 +1256,17 @@ class PtInjector:
 
         # Generování požadavků na základě přítomných parametrů
         if args.parameter:
-            # Single parameter case
+            for parameter in split_parameters(args.parameter):
+                http_request, original_http_request = build_and_mark_request(
+                    parameter
+                )
 
-            http_request, original_http_request = build_and_mark_request(args.parameter)
-            yield from parse_and_yield_request(args.parameter, http_request, original_http_request, parameter_selector=args.parameter)
+                yield from parse_and_yield_request(
+                    parameter,
+                    http_request,
+                    original_http_request,
+                    parameter_selector=parameter,
+                )
         else:
             # Multiple parameters case
             parameter_index = 0
@@ -1257,7 +1316,7 @@ def get_help():
             ["",    "",                       "",                 ""],
             ["-rf", "--request-file",         "<request-file>",   "Set request-file.txt"],
             ["-d",  "--data",                 "<data>",           "Set request-data"],
-            ["-P",  "--parameter",            "<parameter>",      "Set parameter to test (e.g. GET, POST parameters)"],
+            ["-P",  "--parameter",            "<parameter>",      "Set one or more parameters to test, separated by commas (e.g. login or login,password)"],
             ["-H",  "--headers",              "<headers>",        "Set Header(s)"],
             ["-c",  "--cookie",               "<cookie>",         "Set Cookie(s)"],
             ["-a",  "--user-agent",           "<agent>",          "Set User-Agent"],
@@ -1273,6 +1332,22 @@ def get_help():
             ["-j",  "--json",                 "",                 "Output in JSON format"],
         ]
         }]
+
+def split_parameters(value):
+    if value is None:
+        return []
+
+    parameters = [
+        parameter.strip()
+        for parameter in value.split(",")
+    ]
+
+    if any(not parameter for parameter in parameters):
+         raise ValueError(
+            "Parameter list must not contain empty names."
+        )
+
+    return list(dict.fromkeys(parameters))
 
 
 def parse_args() -> argparse.Namespace:
@@ -1301,6 +1376,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--placeholder",                type=str, default="*")
 
     args = parser.parse_args()
+    try:
+        split_parameters(args.parameter)
+    except ValueError as error:
+        parser.error(str(error))
+
+
     if args.timeout <= 0:
         parser.error("--timeout must be greater than zero")
 

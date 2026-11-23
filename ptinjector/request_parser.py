@@ -10,6 +10,16 @@ import email
 import re
 
 class InjectionRequestParser(HttpRequestParser):
+    def get_request_data(self, http_request: str):
+        request_data = super().get_request_data(http_request)
+        headers = dict(self.get_request_headers(http_request))
+        content_type = (self.get_content_type(headers) or "").split(";", 1)[0].strip().lower()
+        if content_type in ("application/x-www-form-urlencoded", ""):
+            # File-ending newlines are not part of the last form value.
+            # Do this before parsing parameters can URL-encode them.
+            request_data = request_data.rstrip("\r\n")
+        return request_data
+
     def _parse_post_data(self, request_data: str, content_type: str) :
 
         if not request_data:
@@ -625,20 +635,3 @@ class InjectionRequestParser(HttpRequestParser):
         raise ValueError(f"Parameter {parameter!r} not found")
 
 
-
-    def find_injected_span(text, template, placeholder):
-        if not placeholder or template.count(placeholder):
-            return None
-
-        prefix, suffix = template.split(placeholder, 1)
-
-        if not text.startswith(prefix):
-            return None
-
-        start = len(prefix)
-        end = len(text) - len(suffix) 
-
-        if start >= end:
-            return None
-
-        return start,end

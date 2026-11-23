@@ -3,7 +3,7 @@ import hashlib
 import xml.etree.ElementTree as ET
 import json
 import re
-from difflib import SequenceMatcher
+from ptinjector._sequence_matcher import ExactSequenceMatcher as SequenceMatcher
 import html
 from urllib.parse import quote, quote_plus, unquote, unquote_plus
 
@@ -17,6 +17,13 @@ def split_content(text):
 
 def find_dynamic_regions(first_text, second_text):
     first_parts = split_content(first_text)
+
+    if first_text == second_text:
+        return {
+            "reference": first_parts,
+            "regions": [],
+        }
+
     second_parts = split_content(second_text)
 
     matcher = SequenceMatcher(
@@ -360,10 +367,25 @@ def increasing_limit_check(responses, verification_list):
 
     return differencesum == len(responses) - 1
 
+def prepare_boolean_response(comparison, variant):
+    cache = comparison.setdefault("_prepared_responses", {})
+
+    if variant not in cache:
+        text, positions = remove_reflected_payload(
+            comparison[f"{variant}_response"].text,
+            comparison[f"{variant}_payload"],
+            with_positions=True,
+        )
+
+        cache[variant] = remove_dynamic_content(
+            text,
+            comparison["baseline"]["dynamic_models"],
+            positions,
+        )
+
+    return cache[variant]
 
 def check_if_vulnerable(comparison, verification_list, injector):
-    models = comparison["baseline"]["dynamic_models"]
-
     true_text = remove_reflected_payload(
         comparison["true_response"].text,
         comparison["true_payload"],
@@ -376,22 +398,18 @@ def check_if_vulnerable(comparison, verification_list, injector):
     if true_text == false_text:
         return False
 
-    true_text = remove_dynamic_content(true_text, models)
-    false_text = remove_dynamic_content(false_text, models)
+    true_text, _ = prepare_boolean_response(comparison, "true")
+    false_text, _ = prepare_boolean_response(comparison, "false")
 
     return true_text != false_text
+
 def find_boolean_evidence(comparison):
     prepared = {}
     evidence = {"true": [], "false": []}
-    models = comparison["baseline"]["dynamic_models"]
+
 
     for variant in ("true", "false"):
-        text, positions = remove_reflected_payload(
-            comparison[f"{variant}_response"].text,
-            comparison[f"{variant}_payload"],
-            with_positions=True,
-        )
-        text, positions = remove_dynamic_content(text, models, positions)
+        text, positions = prepare_boolean_response(comparison, variant)
 
         parts = split_content(text)
         offsets = [0]
